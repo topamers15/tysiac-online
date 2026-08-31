@@ -12,7 +12,6 @@
   input,button{width:100%;padding:12px;margin:8px 0;border-radius:8px;border:none;font-size:16px}
   input{background:#08291f;color:#fff;border:1px solid #2a6e5a}
   button{background:#d8b45b;color:#111;font-weight:bold;cursor:pointer}
-  button:active{opacity:0.8}
   
   .rooms-list{margin:15px 0;max-height:260px;overflow-y:auto}
   .room-item{display:flex;justify-content:space-between;align-items:center;padding:12px;margin:8px 0;background:rgba(0,0,0,0.25);border:1px solid #2a6e5a;border-radius:8px}
@@ -21,6 +20,10 @@
   .game-container{display:none;padding:12px;text-align:center}
   .grid-players{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:15px 0}
   .p-card{padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;border:1px solid #d8b35b}
+  
+  .cards-hand{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:20px}
+  .playing-card{background:#fff;color:#111;padding:12px 16px;border-radius:6px;font-weight:bold;font-size:20px;box-shadow:0 4px 8px rgba(0,0,0,0.3)}
+  .red{color:#e53935}
 </style>
 </head>
 <body>
@@ -35,23 +38,31 @@
 <div id="lobbyScreen" class="card-box" style="display:none">
   <h2>Witaj, <span id="userDisplay"></span>!</h2>
   <h3>Dostępne Stoły:</h3>
-  
   <div id="roomsList" class="rooms-list">
     <small>Ładowanie stołów...</small>
   </div>
-
   <button onclick="createNewRoom()" style="background:#4caf50;color:#fff">+ Stwórz nowy stół</button>
 </div>
 
 <div id="gameScreen" class="game-container">
   <h3 id="roomTitle">Stół: -</h3>
   <div class="grid-players" id="playersList"></div>
-  <div id="statusBox" style="margin:15px 0;font-weight:bold">Oczekiwanie na pozostałych graczy...</div>
+  <div id="statusBox" style="margin:15px 0;font-weight:bold">Oczekiwanie na graczy...</div>
+  
+  <div id="startBtnBox" style="display:none">
+    <button onclick="startGame()" style="background:#4caf50;color:#fff;max-width:250px;margin:10px auto">🚀 ROZPOCZNIJ GRĘ</button>
+  </div>
+
+  <div id="handBox">
+    <h4>Twoje Karty:</h4>
+    <div class="cards-hand" id="myCards"></div>
+  </div>
 </div>
 
 <script>
 const socket = io();
 let currentUser = null;
+let currentRoomId = null;
 
 function authenticate(){
   const username = document.getElementById("userInput").value.trim();
@@ -102,6 +113,7 @@ function joinRoom(roomId, hasPassword = false){
     password = prompt("Ten stół jest zabezpieczony hasłem. Podaj hasło:");
     if(password === null) return;
   }
+  currentRoomId = roomId;
   socket.emit('joinGame', { roomId, password, username: currentUser });
 }
 
@@ -110,12 +122,17 @@ function createNewRoom(){
   if(!name || !name.trim()) return;
 
   const password = prompt("Podaj hasło do stołu (zostaw puste, jeśli ma być publiczny):");
+  currentRoomId = name.trim().toUpperCase();
   
   socket.emit('joinGame', { 
-    roomId: name.trim().toUpperCase(), 
+    roomId: currentRoomId, 
     password: password ? password.trim() : null, 
     username: currentUser 
   });
+}
+
+function startGame(){
+  socket.emit('startGame', { roomId: currentRoomId });
 }
 
 socket.on('updateState', ({ room }) => {
@@ -123,6 +140,7 @@ socket.on('updateState', ({ room }) => {
   document.getElementById("gameScreen").style.display = "block";
   document.getElementById("roomTitle").textContent = `Stół: ${room.roomId}`;
 
+  // Lista graczy
   const list = document.getElementById("playersList");
   list.innerHTML = "";
   for(let i = 0; i < 4; i++){
@@ -133,6 +151,35 @@ socket.on('updateState', ({ room }) => {
         <small>Para ${(i%2)+1}</small>
       </div>
     `;
+  }
+
+  const isHost = room.players[0] && room.players[0].name === currentUser;
+  const statusBox = document.getElementById("statusBox");
+  const startBtnBox = document.getElementById("startBtnBox");
+
+  if (room.gameState.status === 'LOBBY') {
+    if (room.players.length === 4) {
+      statusBox.textContent = isHost ? "Komplet graczy! Kliknij Przycisk poniżej, aby rozpocząć." : "Oczekiwanie aż gospodarz uruchomi grę...";
+      startBtnBox.style.display = isHost ? "block" : "none";
+    } else {
+      statusBox.textContent = `Oczekiwanie na graczy (${room.players.length}/4)...`;
+      startBtnBox.style.display = "none";
+    }
+  } else if (room.gameState.status === 'BIDDING') {
+    statusBox.textContent = "Gra rozpoczęta! Rozdawanie kart completed.";
+    startBtnBox.style.display = "none";
+  }
+
+  // Wyświetlanie kart zalogowanego gracza
+  const me = room.players.find(p => p.name === currentUser);
+  const cardsContainer = document.getElementById("myCards");
+  cardsContainer.innerHTML = "";
+
+  if (me && me.hand && me.hand.length > 0) {
+    me.hand.forEach(c => {
+      const isRed = c.suit === '♥' || c.suit === '♦';
+      cardsContainer.innerHTML += `<div class="playing-card ${isRed ? 'red' : ''}">${c.symbol}</div>`;
+    });
   }
 });
 
