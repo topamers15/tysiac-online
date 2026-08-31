@@ -22,16 +22,22 @@
   .top-bar{display:flex;justify-content:space-between;align-items:center;max-width:600px;margin:0 auto 15px auto}
   .btn-leave{background:#e53935;color:#fff;width:auto;padding:8px 16px;margin:0;font-size:14px;border-radius:6px}
   
-  .grid-players{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:15px 0}
-  .p-card{padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;border:1px solid #d8b35b}
+  .grid-players{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+  .p-card{padding:8px;background:rgba(0,0,0,0.3);border-radius:8px;border:1px solid #d8b35b;font-size:14px}
   .p-card.active-turn{border:2px solid #4caf50;background:rgba(76,175,80,0.2)}
 
-  .bidding-panel{background:rgba(0,0,0,0.4);padding:15px;border-radius:10px;margin:15px auto;max-width:400px}
-  .bid-buttons{display:flex;gap:8px;justify-content:center;margin-top:10px}
-  .bid-buttons button{width:auto;padding:10px 16px}
+  .poker-table{background:#186a52;border:3px dashed #d8b35b;border-radius:16px;padding:20px;margin:15px auto;max-width:500px;min-height:160px;display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap}
   
-  .cards-hand{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:15px}
-  .playing-card{background:#fff;color:#111;padding:12px 16px;border-radius:6px;font-weight:bold;font-size:20px;box-shadow:0 4px 8px rgba(0,0,0,0.3)}
+  .bidding-panel{background:rgba(0,0,0,0.4);padding:12px;border-radius:10px;margin:10px auto;max-width:400px}
+  .bid-buttons{display:flex;gap:8px;justify-content:center;margin-top:10px}
+  .bid-buttons button{width:auto;padding:8px 14px}
+
+  .meld-box{display:flex;gap:8px;justify-content:center;margin:10px 0;flex-wrap:wrap}
+  .btn-meld{background:#ff9800;color:#111;padding:8px 12px;border-radius:6px;font-weight:bold;cursor:pointer}
+
+  .cards-hand{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .playing-card{background:#fff;color:#111;padding:12px 14px;border-radius:6px;font-weight:bold;font-size:18px;box-shadow:0 4px 8px rgba(0,0,0,0.3);cursor:pointer;transition:transform 0.1s}
+  .playing-card:hover{transform:translateY(-5px)}
   .red{color:#e53935}
   .admin-badge{background:#e53935;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;margin-left:6px}
 </style>
@@ -61,25 +67,34 @@
   </div>
 
   <div class="grid-players" id="playersList"></div>
-  <div id="statusBox" style="margin:15px 0;font-weight:bold">Oczekiwanie na graczy...</div>
 
-  <!-- PANEL LICYTACJI I INTERAKCJI Z GRA -->
+  <!-- ZIELONY STÓŁ DO GRY -->
+  <div class="poker-table" id="pokerTable">
+    <small style="opacity:0.6">Karty na stole pojawią się po zagraniu...</small>
+  </div>
+
+  <div id="statusBox" style="margin:10px 0;font-weight:bold">Oczekiwanie na graczy...</div>
+  <div id="meldInfo" style="color:#ffd54f;font-weight:bold;margin:5px 0"></div>
+
+  <!-- PANEL LICYTACJI (TYLKO PODCZAS FAZY LICYTACJI) -->
   <div id="biddingBox" class="bidding-panel" style="display:none">
-    <div>Aktualna Stawka: <b id="currentBidVal">100</b></div>
-    <div>Licytuje: <b id="currentTurnName">-</b></div>
+    <div>Stawka: <b id="currentBidVal">100</b> | Licytuje: <b id="currentTurnName">-</b></div>
     <div id="bidControls" class="bid-buttons" style="display:none">
       <button onclick="sendBid('BID', 10)" style="background:#4caf50;color:#fff">+10</button>
       <button onclick="sendBid('BID', 20)" style="background:#4caf50;color:#fff">+20</button>
       <button onclick="sendBid('PASS', 0)" style="background:#e53935;color:#fff">PAS</button>
     </div>
   </div>
+
+  <!-- PANEL PRZEMELDOWAŃ -->
+  <div id="meldPanel" class="meld-box" style="display:none"></div>
   
   <div id="startBtnBox" style="display:none">
     <button onclick="startGame()" style="background:#4caf50;color:#fff;max-width:250px;margin:10px auto">🚀 ROZPOCZNIJ GRĘ</button>
   </div>
 
   <div id="handBox">
-    <h4>Twoje Karty:</h4>
+    <h4>Twoje Karty (Kliknij kartę, aby zagrać):</h4>
     <div class="cards-hand" id="myCards"></div>
   </div>
 </div>
@@ -91,6 +106,7 @@ let currentPin = null;
 let currentRoomId = null;
 let isAdminUser = false;
 let currentBidState = 100;
+let selectedMeldSuit = null;
 
 function authenticate(){
   const username = document.getElementById("userInput").value.trim();
@@ -129,8 +145,8 @@ socket.on('roomListUpdate', (rooms) => {
     let adminButtons = '';
     if(isAdminUser){
       adminButtons = `
-        <button onclick="adminResetTimer('${id}')" style="background:#2196F3;color:#fff" title="Resetuj 1 min nieaktywności">⏱️ Timer</button>
-        <button onclick="resetRoom('${id}')" style="background:#ff9800;color:#fff" title="Czyszczenie stołu">🔄 Clear</button>
+        <button onclick="adminResetTimer('${id}')" style="background:#2196F3;color:#fff">⏱️ Timer</button>
+        <button onclick="resetRoom('${id}')" style="background:#ff9800;color:#fff">🔄 Clear</button>
       `;
     }
 
@@ -175,7 +191,7 @@ function createNewRoom(){
   const name = prompt("Podaj nazwę nowego stołu:");
   if(!name || !name.trim()) return;
 
-  const password = prompt("Podaj hasło do stołu (zostaw puste, jeśli ma być publiczny):");
+  const password = prompt("Podaj hasło do stołu:");
   currentRoomId = name.trim().toUpperCase();
   
   socket.emit('joinGame', { 
@@ -207,16 +223,43 @@ function sendBid(action, increment){
   socket.emit('makeBid', { roomId: currentRoomId, action, value: newValue });
 }
 
+function playCard(symbol){
+  socket.emit('playCard', { roomId: currentRoomId, cardSymbol: symbol, meldSuit: selectedMeldSuit });
+  selectedMeldSuit = null;
+}
+
+function selectMeld(suit){
+  selectedMeldSuit = suit;
+  alert(`Wybrano meldunek ${suit}! Teraz kliknij Króla (K) lub Damę (Q) z tego koloru, aby zagrać.`);
+}
+
+function checkMelds(hand){
+  const suits = ['♥', '♦', '♣', '♠'];
+  const meldNames = { '♥': 'Czerwiec (100)', '♦': 'Dzwonek (80)', '♣': 'Żołądź (60)', '♠': 'Wino (40)' };
+  let available = [];
+
+  suits.forEach(s => {
+    const hasKing = hand.some(c => c.rank === 'K' && c.suit === s);
+    const hasQueen = hand.some(c => c.rank === 'Q' && c.suit === s);
+    if(hasKing && hasQueen){
+      available.push({ suit: s, label: meldNames[s] });
+    }
+  });
+  return available;
+}
+
+// ODBIERANIE STANU GRY - AUTOMATYCZNE PRZEŁĄCZANIE WIDOKU U WSZYSTKICH
 socket.on('updateState', ({ room }) => {
   if (!currentRoomId || room.roomId !== currentRoomId) return;
 
+  // Ukrywamy Lobby, włączamy ekran gry u KAŻDEGO z 4 graczy
   document.getElementById("lobbyScreen").style.display = "none";
   document.getElementById("gameScreen").style.display = "block";
   document.getElementById("roomTitle").textContent = `Stół: ${room.roomId}`;
 
   const state = room.gameState;
 
-  // Renderowanie listy graczy
+  // Lista Graczy
   const list = document.getElementById("playersList");
   list.innerHTML = "";
   for(let i = 0; i < Math.max(4, room.players.length); i++){
@@ -225,9 +268,26 @@ socket.on('updateState', ({ room }) => {
     list.innerHTML += `
       <div class="p-card ${isCurrentTurn ? 'active-turn' : ''}">
         <b>${p ? p.name : 'Wolne miejsce'}</b><br>
-        <small>Para ${((i%2)+1)}</small>
+        <small>Pkt: ${p ? (p.score || 0) : 0}</small>
       </div>
     `;
+  }
+
+  // Stół do gry
+  const pokerTable = document.getElementById("pokerTable");
+  if (state.tableCards && state.tableCards.length > 0) {
+    pokerTable.innerHTML = "";
+    state.tableCards.forEach(tc => {
+      const isRed = tc.card.suit === '♥' || tc.card.suit === '♦';
+      pokerTable.innerHTML += `
+        <div style="text-align:center">
+          <small style="display:block;font-size:11px">${tc.playerName}</small>
+          <div class="playing-card ${isRed ? 'red' : ''}">${tc.card.symbol}</div>
+        </div>
+      `;
+    });
+  } else {
+    pokerTable.innerHTML = `<small style="opacity:0.6">Karty na stole pojawią się po zagraniu...</small>`;
   }
 
   const isHost = room.players[0] && room.players[0].name === currentUser;
@@ -235,11 +295,15 @@ socket.on('updateState', ({ room }) => {
   const startBtnBox = document.getElementById("startBtnBox");
   const biddingBox = document.getElementById("biddingBox");
   const bidControls = document.getElementById("bidControls");
+  const meldPanel = document.getElementById("meldPanel");
+
+  document.getElementById("meldInfo").textContent = state.declaredMeld || "";
 
   if (state.status === 'LOBBY') {
     biddingBox.style.display = "none";
+    meldPanel.style.display = "none";
     if (room.players.length >= 4) {
-      statusBox.textContent = isHost ? "Komplet graczy! Kliknij przycisk, aby rozpocząć licytację." : "Oczekiwanie aż gospodarz uruchomi grę...";
+      statusBox.textContent = isHost ? "Komplet graczy! Rozpocznij grę." : "Oczekiwanie na start...";
       startBtnBox.style.display = isHost ? "block" : "none";
     } else {
       statusBox.textContent = `Oczekiwanie na graczy (${room.players.length}/4)...`;
@@ -248,6 +312,7 @@ socket.on('updateState', ({ room }) => {
   } else if (state.status === 'BIDDING') {
     startBtnBox.style.display = "none";
     biddingBox.style.display = "block";
+    meldPanel.style.display = "none";
     
     currentBidState = state.currentBid;
     document.getElementById("currentBidVal").textContent = state.currentBid;
@@ -256,24 +321,44 @@ socket.on('updateState', ({ room }) => {
     document.getElementById("currentTurnName").textContent = turnPlayer ? turnPlayer.name : "-";
 
     const isMyTurn = turnPlayer && turnPlayer.name === currentUser;
-    statusBox.textContent = isMyTurn ? "👉 TWOJA KOLEJ NA LICYTACJĘ!" : `Trwa licytacja. Kolej gracza: ${turnPlayer ? turnPlayer.name : ''}`;
+    statusBox.textContent = isMyTurn ? "👉 TWOJA KOLEJ NA LICYTACJĘ!" : `Licytuje: ${turnPlayer ? turnPlayer.name : ''}`;
     bidControls.style.display = isMyTurn ? "flex" : "none";
-  } else if (state.status === 'BIDDING_FINISHED') {
-    biddingBox.style.display = "block";
-    bidControls.style.display = "none";
-    const winner = room.players[state.currentTurnIndex];
-    statusBox.textContent = `Licytację wygrał ${winner ? winner.name : ''} ze stawką ${state.currentBid}! Musik trafia do gracza.`;
+  } else if (state.status === 'PLAYING') {
+    biddingBox.style.display = "none";
+    startBtnBox.style.display = "none";
+
+    const turnPlayer = room.players[state.currentTurnIndex];
+    const isMyTurn = turnPlayer && turnPlayer.name === currentUser;
+    statusBox.textContent = isMyTurn ? "👉 TWOJA TURA - KLIKNIJ KARTĘ, ABY ZAGRAĆ" : `Ruch gracza: ${turnPlayer ? turnPlayer.name : ''}`;
+
+    if (isMyTurn) {
+      const me = room.players.find(p => p.name === currentUser);
+      const melds = checkMelds(me ? me.hand : []);
+      if (melds.length > 0) {
+        meldPanel.style.display = "flex";
+        meldPanel.innerHTML = '<b style="width:100%">Możliwy Meldunek:</b>';
+        melds.forEach(m => {
+          meldPanel.innerHTML += `<button class="btn-meld" onclick="selectMeld('${m.suit}')">Melduj ${m.label}</button>`;
+        });
+      } else {
+        meldPanel.style.display = "none";
+      }
+    } else {
+      meldPanel.style.display = "none";
+    }
   }
 
-  // Wyświetlanie kart gracza
+  // Wyświetlanie WYŁĄCZNIE własnych kart gracza
   const me = room.players.find(p => p.name === currentUser);
   const cardsContainer = document.getElementById("myCards");
   cardsContainer.innerHTML = "";
 
   if (me && me.hand && me.hand.length > 0) {
+    const isMyTurn = room.players[state.currentTurnIndex] && room.players[state.currentTurnIndex].name === currentUser;
     me.hand.forEach(c => {
       const isRed = c.suit === '♥' || c.suit === '♦';
-      cardsContainer.innerHTML += `<div class="playing-card ${isRed ? 'red' : ''}">${c.symbol}</div>`;
+      const onClickAttr = (state.status === 'PLAYING' && isMyTurn) ? `onclick="playCard('${c.symbol}')"` : '';
+      cardsContainer.innerHTML += `<div class="playing-card ${isRed ? 'red' : ''}" ${onClickAttr}>${c.symbol}</div>`;
     });
   }
 });
