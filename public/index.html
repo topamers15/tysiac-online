@@ -24,8 +24,13 @@
   
   .grid-players{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:15px 0}
   .p-card{padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;border:1px solid #d8b35b}
+  .p-card.active-turn{border:2px solid #4caf50;background:rgba(76,175,80,0.2)}
+
+  .bidding-panel{background:rgba(0,0,0,0.4);padding:15px;border-radius:10px;margin:15px auto;max-width:400px}
+  .bid-buttons{display:flex;gap:8px;justify-content:center;margin-top:10px}
+  .bid-buttons button{width:auto;padding:10px 16px}
   
-  .cards-hand{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:20px}
+  .cards-hand{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:15px}
   .playing-card{background:#fff;color:#111;padding:12px 16px;border-radius:6px;font-weight:bold;font-size:20px;box-shadow:0 4px 8px rgba(0,0,0,0.3)}
   .red{color:#e53935}
   .admin-badge{background:#e53935;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;margin-left:6px}
@@ -57,6 +62,17 @@
 
   <div class="grid-players" id="playersList"></div>
   <div id="statusBox" style="margin:15px 0;font-weight:bold">Oczekiwanie na graczy...</div>
+
+  <!-- PANEL LICYTACJI I INTERAKCJI Z GRA -->
+  <div id="biddingBox" class="bidding-panel" style="display:none">
+    <div>Aktualna Stawka: <b id="currentBidVal">100</b></div>
+    <div>Licytuje: <b id="currentTurnName">-</b></div>
+    <div id="bidControls" class="bid-buttons" style="display:none">
+      <button onclick="sendBid('BID', 10)" style="background:#4caf50;color:#fff">+10</button>
+      <button onclick="sendBid('BID', 20)" style="background:#4caf50;color:#fff">+20</button>
+      <button onclick="sendBid('PASS', 0)" style="background:#e53935;color:#fff">PAS</button>
+    </div>
+  </div>
   
   <div id="startBtnBox" style="display:none">
     <button onclick="startGame()" style="background:#4caf50;color:#fff;max-width:250px;margin:10px auto">🚀 ROZPOCZNIJ GRĘ</button>
@@ -74,6 +90,7 @@ let currentUser = null;
 let currentPin = null;
 let currentRoomId = null;
 let isAdminUser = false;
+let currentBidState = 100;
 
 function authenticate(){
   const username = document.getElementById("userInput").value.trim();
@@ -185,6 +202,11 @@ function startGame(){
   socket.emit('startGame', { roomId: currentRoomId });
 }
 
+function sendBid(action, increment){
+  const newValue = currentBidState + increment;
+  socket.emit('makeBid', { roomId: currentRoomId, action, value: newValue });
+}
+
 socket.on('updateState', ({ room }) => {
   if (!currentRoomId || room.roomId !== currentRoomId) return;
 
@@ -192,12 +214,16 @@ socket.on('updateState', ({ room }) => {
   document.getElementById("gameScreen").style.display = "block";
   document.getElementById("roomTitle").textContent = `Stół: ${room.roomId}`;
 
+  const state = room.gameState;
+
+  // Renderowanie listy graczy
   const list = document.getElementById("playersList");
   list.innerHTML = "";
   for(let i = 0; i < Math.max(4, room.players.length); i++){
     const p = room.players[i];
+    const isCurrentTurn = state.currentTurnIndex === i && state.status !== 'LOBBY';
     list.innerHTML += `
-      <div class="p-card">
+      <div class="p-card ${isCurrentTurn ? 'active-turn' : ''}">
         <b>${p ? p.name : 'Wolne miejsce'}</b><br>
         <small>Para ${((i%2)+1)}</small>
       </div>
@@ -207,20 +233,39 @@ socket.on('updateState', ({ room }) => {
   const isHost = room.players[0] && room.players[0].name === currentUser;
   const statusBox = document.getElementById("statusBox");
   const startBtnBox = document.getElementById("startBtnBox");
+  const biddingBox = document.getElementById("biddingBox");
+  const bidControls = document.getElementById("bidControls");
 
-  if (room.gameState.status === 'LOBBY') {
+  if (state.status === 'LOBBY') {
+    biddingBox.style.display = "none";
     if (room.players.length >= 4) {
-      statusBox.textContent = isHost ? "Komplet graczy! Kliknij Przycisk poniżej, aby rozpocząć." : "Oczekiwanie aż gospodarz uruchomi grę...";
+      statusBox.textContent = isHost ? "Komplet graczy! Kliknij przycisk, aby rozpocząć licytację." : "Oczekiwanie aż gospodarz uruchomi grę...";
       startBtnBox.style.display = isHost ? "block" : "none";
     } else {
       statusBox.textContent = `Oczekiwanie na graczy (${room.players.length}/4)...`;
       startBtnBox.style.display = "none";
     }
-  } else if (room.gameState.status === 'BIDDING') {
-    statusBox.textContent = "Gra rozpoczęta! Rozdano karty.";
+  } else if (state.status === 'BIDDING') {
     startBtnBox.style.display = "none";
+    biddingBox.style.display = "block";
+    
+    currentBidState = state.currentBid;
+    document.getElementById("currentBidVal").textContent = state.currentBid;
+    
+    const turnPlayer = room.players[state.currentTurnIndex];
+    document.getElementById("currentTurnName").textContent = turnPlayer ? turnPlayer.name : "-";
+
+    const isMyTurn = turnPlayer && turnPlayer.name === currentUser;
+    statusBox.textContent = isMyTurn ? "👉 TWOJA KOLEJ NA LICYTACJĘ!" : `Trwa licytacja. Kolej gracza: ${turnPlayer ? turnPlayer.name : ''}`;
+    bidControls.style.display = isMyTurn ? "flex" : "none";
+  } else if (state.status === 'BIDDING_FINISHED') {
+    biddingBox.style.display = "block";
+    bidControls.style.display = "none";
+    const winner = room.players[state.currentTurnIndex];
+    statusBox.textContent = `Licytację wygrał ${winner ? winner.name : ''} ze stawką ${state.currentBid}! Musik trafia do gracza.`;
   }
 
+  // Wyświetlanie kart gracza
   const me = room.players.find(p => p.name === currentUser);
   const cardsContainer = document.getElementById("myCards");
   cardsContainer.innerHTML = "";
