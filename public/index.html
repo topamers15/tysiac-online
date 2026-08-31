@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Tysiąc – Gra Parami Multiplayer</title>
+<title>Tysiąc – Gra Parami Real-time</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
 *{box-sizing:border-box}
@@ -12,7 +12,7 @@ button,select,input{font:inherit}
 button{border:0;border-radius:9px;padding:9px 12px;background:#d8b45b;color:#21190d;font-weight:bold;cursor:pointer;}
 button:hover{filter:brightness(1.08)}
 button:disabled{opacity:.4;cursor:default}
-.top{max-width:1450px;margin:auto;padding:12px;display:flex;justify-content:space-between;align-items:center;}
+.top{max-width:1450px;margin:auto;padding:12px;display:flex;justify-space:between;align-items:center;}
 .brand{font-size:23px;font-weight:900;}
 .sub{font-size:11px;opacity:.7;margin-top:3px;}
 .layout{max-width:1450px;margin:auto;padding:0 12px 12px;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;}
@@ -156,17 +156,16 @@ function sendChat() {
 function render() {
     if (!state) return;
 
-    // RENDER GRACZY
     for (let i = 0; i < 4; i++) {
         const el = document.getElementById("player" + (i + 1));
         const active = (state.phase === "bid" && state.bidder === i) || (state.phase === "play" && state.leader === i);
         el.className = `player player-${i + 1}${active ? " active" : ""}`;
         el.innerHTML = `
             <b>${PLAYERS[i]} ${i === state.myIndex ? "🎮" : ""}</b><br>
-            <small>Para ${(i % 2) + 1} ${state.passed.includes(i) ? "• PAS" : ""}</small>;
+            <small>Para ${(i % 2) + 1} ${state.passed.includes(i) ? "• PAS" : ""}</small>
+        `;
     }
 
-    // RENDER RĘKI GRACZA
     const handEl = document.getElementById("hand");
     handEl.innerHTML = (state.myHand || []).map(card => `
         <div class="card ${card.red ? "red" : ""} ${selectedExchange.includes(card.id) ? "selected" : ""}" data-id="${card.id}">
@@ -184,7 +183,6 @@ function render() {
         };
     });
 
-    // MUSIK / STEERING CONTROLS
     const controls = document.getElementById("controls");
     controls.innerHTML = "";
     controls.className = state.phase === "bid" ? "bid-dock" : (state.phase === "exchange" ? "exchange-dock" : "");
@@ -222,12 +220,10 @@ function render() {
         controls.appendChild(b);
     }
 
-    // RENDER LEWY
     document.getElementById("trick").innerHTML = state.trick.map(p => `
         <div class="trick-player"><small>${PLAYERS[p.player]}</small>${cardHTML(p.card)}</div>
     `).join("");
 
-    // SYNC WYNIKÓW I LOGÓW
     document.getElementById("score0").textContent = state.scores[0];
     document.getElementById("score1").textContent = state.scores[1];
     document.getElementById("log").innerHTML = state.log.map(l => `<div>${l}</div>`).join("");
