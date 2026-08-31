@@ -8,14 +8,15 @@
 <style>
   *{box-sizing:border-box}
   body{margin:0;background:#0d3b2e;color:#f7f0dc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-  .card-box{max-width:420px;margin:30px auto;padding:20px;background:#134e3e;border:2px solid #d8b35b;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.4)}
+  .card-box{max-width:440px;margin:30px auto;padding:20px;background:#134e3e;border:2px solid #d8b35b;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.4)}
   input,button{width:100%;padding:12px;margin:8px 0;border-radius:8px;border:none;font-size:16px}
   input{background:#08291f;color:#fff;border:1px solid #2a6e5a}
   button{background:#d8b45b;color:#111;font-weight:bold;cursor:pointer}
   
-  .rooms-list{margin:15px 0;max-height:260px;overflow-y:auto}
+  .rooms-list{margin:15px 0;max-height:280px;overflow-y:auto}
   .room-item{display:flex;justify-content:space-between;align-items:center;padding:12px;margin:8px 0;background:rgba(0,0,0,0.25);border:1px solid #2a6e5a;border-radius:8px}
-  .room-item button{width:auto;padding:8px 16px;margin:0}
+  .room-actions{display:flex;gap:4px;flex-wrap:wrap}
+  .room-item button{width:auto;padding:6px 10px;margin:0;font-size:12px}
 
   .game-container{display:none;padding:12px;text-align:center}
   .top-bar{display:flex;justify-content:space-between;align-items:center;max-width:600px;margin:0 auto 15px auto}
@@ -27,6 +28,7 @@
   .cards-hand{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:20px}
   .playing-card{background:#fff;color:#111;padding:12px 16px;border-radius:6px;font-weight:bold;font-size:20px;box-shadow:0 4px 8px rgba(0,0,0,0.3)}
   .red{color:#e53935}
+  .admin-badge{background:#e53935;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;margin-left:6px}
 </style>
 </head>
 <body>
@@ -39,7 +41,7 @@
 </div>
 
 <div id="lobbyScreen" class="card-box" style="display:none">
-  <h2>Witaj, <span id="userDisplay"></span>!</h2>
+  <h2>Witaj, <span id="userDisplay"></span><span id="adminTag"></span>!</h2>
   <h3>Dostępne Stoły:</h3>
   <div id="roomsList" class="rooms-list">
     <small>Ładowanie stołów...</small>
@@ -69,7 +71,9 @@
 <script>
 const socket = io();
 let currentUser = null;
+let currentPin = null;
 let currentRoomId = null;
+let isAdminUser = false;
 
 function authenticate(){
   const username = document.getElementById("userInput").value.trim();
@@ -79,7 +83,12 @@ function authenticate(){
   socket.emit('authPlayer', { username, pin }, (res) => {
     if(res.success){
       currentUser = res.username;
+      currentPin = pin;
+      isAdminUser = res.isAdmin;
       document.getElementById("userDisplay").textContent = currentUser;
+      if(isAdminUser){
+        document.getElementById("adminTag").innerHTML = '<span class="admin-badge">ADMIN</span>';
+      }
       document.getElementById("authScreen").style.display = "none";
       document.getElementById("lobbyScreen").style.display = "block";
     } else {
@@ -100,15 +109,26 @@ socket.on('roomListUpdate', (rooms) => {
     const count = existing ? existing.playerCount : 0;
     const hasPassword = existing ? existing.hasPassword : false;
     
+    let adminButtons = '';
+    if(isAdminUser){
+      adminButtons = `
+        <button onclick="adminResetTimer('${id}')" style="background:#2196F3;color:#fff" title="Resetuj 1 min nieaktywności">⏱️ Timer</button>
+        <button onclick="resetRoom('${id}')" style="background:#ff9800;color:#fff" title="Czyszczenie stołu">🔄 Clear</button>
+      `;
+    }
+
     container.innerHTML += `
       <div class="room-item">
         <div style="text-align:left">
           <b>${id} ${hasPassword ? '🔒' : ''}</b><br>
           <small>Graczy: ${count}/4</small>
         </div>
-        <button onclick="joinRoom('${id}', ${hasPassword})" ${count >= 4 ? 'disabled style="opacity:0.5"' : ''}>
-          ${count >= 4 ? 'Pełny' : 'Dołącz'}
-        </button>
+        <div class="room-actions">
+          <button onclick="joinRoom('${id}', ${hasPassword})" ${(!isAdminUser && count >= 4) ? 'disabled style="opacity:0.5"' : ''}>
+            ${isAdminUser ? 'Podgląd / Wesz' : (count >= 4 ? 'Pełny' : 'Dołącz')}
+          </button>
+          ${adminButtons}
+        </div>
       </div>
     `;
   });
@@ -116,12 +136,22 @@ socket.on('roomListUpdate', (rooms) => {
 
 function joinRoom(roomId, hasPassword = false){
   let password = null;
-  if(hasPassword){
+  if(hasPassword && !isAdminUser){
     password = prompt("Ten stół jest zabezpieczony hasłem. Podaj hasło:");
     if(password === null) return;
   }
   currentRoomId = roomId;
-  socket.emit('joinGame', { roomId, password, username: currentUser });
+  socket.emit('joinGame', { roomId, password, username: currentUser, pin: currentPin });
+}
+
+function adminResetTimer(roomId){
+  socket.emit('adminResetTimer', { roomId, pin: currentPin });
+}
+
+function resetRoom(roomId){
+  if(confirm(`Czy na pewno chcesz wyczyścić ${roomId}?`)){
+    socket.emit('resetRoom', { roomId });
+  }
 }
 
 function createNewRoom(){
@@ -134,7 +164,8 @@ function createNewRoom(){
   socket.emit('joinGame', { 
     roomId: currentRoomId, 
     password: password ? password.trim() : null, 
-    username: currentUser 
+    username: currentUser,
+    pin: currentPin
   });
 }
 
@@ -155,22 +186,20 @@ function startGame(){
 }
 
 socket.on('updateState', ({ room }) => {
-  // Jeśli gracz wyszedł, nie aktualizujemy widoku stołu
   if (!currentRoomId || room.roomId !== currentRoomId) return;
 
   document.getElementById("lobbyScreen").style.display = "none";
   document.getElementById("gameScreen").style.display = "block";
   document.getElementById("roomTitle").textContent = `Stół: ${room.roomId}`;
 
-  // Lista graczy
   const list = document.getElementById("playersList");
   list.innerHTML = "";
-  for(let i = 0; i < 4; i++){
+  for(let i = 0; i < Math.max(4, room.players.length); i++){
     const p = room.players[i];
     list.innerHTML += `
       <div class="p-card">
         <b>${p ? p.name : 'Wolne miejsce'}</b><br>
-        <small>Para ${(i%2)+1}</small>
+        <small>Para ${((i%2)+1)}</small>
       </div>
     `;
   }
@@ -180,7 +209,7 @@ socket.on('updateState', ({ room }) => {
   const startBtnBox = document.getElementById("startBtnBox");
 
   if (room.gameState.status === 'LOBBY') {
-    if (room.players.length === 4) {
+    if (room.players.length >= 4) {
       statusBox.textContent = isHost ? "Komplet graczy! Kliknij Przycisk poniżej, aby rozpocząć." : "Oczekiwanie aż gospodarz uruchomi grę...";
       startBtnBox.style.display = isHost ? "block" : "none";
     } else {
@@ -188,11 +217,10 @@ socket.on('updateState', ({ room }) => {
       startBtnBox.style.display = "none";
     }
   } else if (room.gameState.status === 'BIDDING') {
-    statusBox.textContent = "Gra rozpoczęta! Rozdawanie kart zakończone.";
+    statusBox.textContent = "Gra rozpoczęta! Rozdano karty.";
     startBtnBox.style.display = "none";
   }
 
-  // Wyświetlanie kart zalogowanego gracza
   const me = room.players.find(p => p.name === currentUser);
   const cardsContainer = document.getElementById("myCards");
   cardsContainer.innerHTML = "";
