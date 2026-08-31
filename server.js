@@ -40,8 +40,10 @@ let gameState = {
     melds: [0, 0],
     meldedSuits: [],
     roundCardPoints: [0, 0],
+    lastRoundSummary: null,
     log: [],
-    chat: []
+    chat: [],
+    paused: false
 };
 
 function createDeck() {
@@ -66,11 +68,21 @@ function team(seat) {
     return seat % 2;
 }
 
+function addLog(msg) {
+    gameState.log.unshift(msg);
+    gameState.log = gameState.log.slice(0, 20);
+}
+
+function addChat(text) {
+    gameState.chat.push(text);
+    gameState.chat = gameState.chat.slice(-40);
+}
+
 function startNewRound() {
     const deck = createDeck();
     gameState.players.forEach(p => p.hand = []);
 
-    // Deal 5 cards each
+    // Każdy po 5 kart
     for (let round = 0; round < 5; round++) {
         for (let i = 0; i < 4; i++) {
             const playerIndex = (gameState.dealer + i) % 4;
@@ -78,7 +90,7 @@ function startNewRound() {
         }
     }
 
-    // 4 cards to musik
+    // 4 karty do musika
     gameState.musik = deck.splice(0, 4);
 
     gameState.players.forEach(p => {
@@ -99,13 +111,11 @@ function startNewRound() {
     gameState.meldedSuits = [];
     gameState.roundCardPoints = [0, 0];
 
-    addLog(`🔨 Gracz ${gameState.players[gameState.openingBidder].name} otwiera licytację obowiązkowym 100.`);
-    io.emit('stateUpdate', gameState);
-}
+    addChat(`SYSTEM: Rozdanie ${gameState.round}. ${gameState.players[gameState.openingBidder].name} rozpoczyna obowiązkowo od 100.`);
+    addLog(`🔨 ${gameState.players[gameState.openingBidder].name} otwiera licytację obowiązkowym 100.`);
+    addLog(`🎴 Rozdano karty.`);
 
-function addLog(msg) {
-    gameState.log.unshift(msg);
-    gameState.log = gameState.log.slice(0, 20);
+    io.emit('stateUpdate', gameState);
 }
 
 function canPlayCard(seat, card) {
@@ -128,25 +138,39 @@ function canPlayCard(seat, card) {
     return true;
 }
 
+function getCrossMeldCandidate(seat) {
+    if (gameState.phase !== "play" || gameState.leader !== seat || gameState.trick.length === 0) return null;
+    const previous = gameState.trick[gameState.trick.length - 1];
+    if (!previous || previous.player === seat || previous.card.rank !== "Q" || gameState.meldedSuits.includes(previous.card.suit)) return null;
+
+    return gameState.players[seat].hand.find(c => c.rank === "K" && c.suit === previous.card.suit) || null;
+}
+
 io.on('connection', (socket) => {
     socket.on('joinGame', (name) => {
         if (gameState.players.length < 4) {
             const seat = gameState.players.length;
             gameState.players.push({ id: socket.id, name, seat, hand: [] });
             socket.emit('assignedSeat', seat);
+            
+            addChat(`SYSTEM: Dołączył ${name} (Gracz ${seat + 1}).`);
+
             if (gameState.players.length === 4) {
                 startNewRound();
             } else {
                 io.emit('stateUpdate', gameState);
             }
+        } else {
+            socket.emit('fullGame');
         }
     });
 
     socket.on('bid', ({ seat, amount }) => {
-        if (gameState.phase !== "bid" || gameState.bidder !== seat || gameState.passed.includes(seat)) return;
+        if (gameState.phase !== "bid" || gameState.bidder !== seat || gameState.passed.includes(seat) || gameState.paused) return;
 
         if (amount === 0) {
             gameState.passed.push(seat);
+            addChat(`${gameState.players[seat].name}: 🔴 PAS — wycofuje się z licytacji.`);
             addLog(`🔴 ${gameState.players[seat].name} spasował.`);
         } else {
             if (amount <= gameState.highestBid) return;
@@ -162,7 +186,7 @@ io.on('connection', (socket) => {
             gameState.declared = gameState.highestBid;
             gameState.phase = "exchange";
             gameState.bidder = -1;
-            addLog(`🎉 Licytację wygrywa ${gameState.players[winner].name} za ${gameState.highestBid}.`);
+            addChat(`SYSTEM: ${gameState.players[winner].name} wygrywa licytację za ${gameState.highestBid}. Musik widoczny dla wszystkich.`);
         } else {
             let next = (seat + 1) % 4;
             while (gameState.passed.includes(next)) {
@@ -174,22 +198,26 @@ io.on('connection', (socket) => {
     });
 
     socket.on('exchangeCards', ({ seat, selectedIds, recipients }) => {
-        if (gameState.phase !== "exchange" || gameState.highestBidder !== seat) return;
+        if (gameState.phase !== "exchange" || gameState.highestBidder !== seat || gameState.paused) return;
         if (selectedIds.length !== 3) return;
 
         const p = gameState.players[seat];
+
         selectedIds.forEach((id, index) => {
-            let cardIndex = p.hand.findIndex(c => c.id === id);
+            const target = recipients[index];
             let card = null;
+
+            let cardIndex = p.hand.findIndex(c => c.id === id);
             if (cardIndex >= 0) {
                 card = p.hand.splice(cardIndex, 1)[0];
             } else {
                 let mIndex = gameState.musik.findIndex(c => c.id === id);
                 if (mIndex >= 0) card = gameState.musik.splice(mIndex, 1)[0];
             }
+
             if (card) {
-                const target = recipients[index];
                 gameState.players[target].hand.push(card);
+                addLog(`📤 ${p.name} przekazuje ${card.rank}${card.symbol} → ${gameState.players[target].name}`);
             }
         });
 
@@ -199,12 +227,12 @@ io.on('connection', (socket) => {
 
         gameState.phase = "play";
         gameState.leader = gameState.highestBidder;
-        addLog(`📤 Wymiana zakończona. Gracz ${gameState.players[gameState.leader].name} rozpoczyna grę.`);
+        addChat(`SYSTEM: Wymiana zakończona. Rozpoczyna ${gameState.players[gameState.leader].name}.`);
         io.emit('stateUpdate', gameState);
     });
 
     socket.on('playCard', ({ seat, cardId, crossMeld }) => {
-        if (gameState.phase !== "play" || gameState.leader !== seat) return;
+        if (gameState.phase !== "play" || gameState.leader !== seat || gameState.paused) return;
 
         const p = gameState.players[seat];
         const cardIndex = p.hand.findIndex(c => c.id === cardId);
@@ -212,23 +240,27 @@ io.on('connection', (socket) => {
 
         const card = p.hand[cardIndex];
 
-        if (!crossMeld && !canPlayCard(seat, card)) return;
+        const isCrossCandidate = getCrossMeldCandidate(seat)?.id === cardId;
+        if (!crossMeld || !isCrossCandidate) {
+            if (!canPlayCard(seat, card)) return;
+        }
 
         p.hand.splice(cardIndex, 1);
         gameState.trick.push({ player: seat, card });
 
-        if (crossMeld) {
+        if (crossMeld && isCrossCandidate) {
             gameState.meldedSuits.push(card.suit);
             gameState.trump = card.suit;
             const suitObj = SUITS.find(s => s.name === card.suit);
             gameState.melds[team(seat)] += suitObj.meld;
-            addLog(`💍 ${p.name} przemeldowuje Królem na Damę w kolorze ${card.suit} (+${suitObj.meld} pkt)`);
+            addChat(`SYSTEM: 💍 ${p.name} melduje królem na damę ${card.suit} za ${suitObj.meld} pkt.`);
+            addLog(`💍 ${p.name} meldunek K na Q ${card.suit} +${suitObj.meld}`);
         }
 
-        addLog(`🃏 ${p.name} zagrał ${card.rank} ${card.symbol}`);
+        addLog(`🃏 ${p.name} zagrał ${card.rank}${card.symbol}`);
 
         if (gameState.trick.length === 4) {
-            setTimeout(resolveTrick, 1000);
+            setTimeout(resolveTrick, 800);
         } else {
             gameState.leader = (seat + 1) % 4;
         }
@@ -236,7 +268,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('makeMeld', ({ seat }) => {
-        if (gameState.phase !== "play" || gameState.trick.length === 0 || gameState.trick[0].player !== seat) return;
+        if (gameState.phase !== "play" || gameState.trick.length === 0 || gameState.trick[0].player !== seat || gameState.paused) return;
         const firstCard = gameState.trick[0].card;
         if (firstCard.rank !== "K" && firstCard.rank !== "Q") return;
         if (gameState.meldedSuits.includes(firstCard.suit)) return;
@@ -249,9 +281,40 @@ io.on('connection', (socket) => {
             gameState.trump = firstCard.suit;
             const suitObj = SUITS.find(s => s.name === firstCard.suit);
             gameState.melds[team(seat)] += suitObj.meld;
-            addLog(`💍 ${gameState.players[seat].name} melduje ${firstCard.suit} (+${suitObj.meld} pkt)`);
+            addChat(`SYSTEM: 💍 ${gameState.players[seat].name} melduje ${firstCard.suit} za ${suitObj.meld} pkt.`);
+            addLog(`💍 ${gameState.players[seat].name} meldunek ${firstCard.suit} +${suitObj.meld}`);
             io.emit('stateUpdate', gameState);
         }
+    });
+
+    socket.on('sendChat', (text) => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (player && text.trim()) {
+            addChat(`${player.name}: ${text.trim()}`);
+            io.emit('stateUpdate', gameState);
+        }
+    });
+
+    socket.on('nextRound', () => {
+        if (gameState.phase === "next") {
+            gameState.round++;
+            gameState.dealer = (gameState.dealer + 1) % 4;
+            startNewRound();
+        }
+    });
+
+    socket.on('newGame', () => {
+        gameState.round = 1;
+        gameState.dealer = 0;
+        gameState.scores = [0, 0];
+        gameState.lastRoundSummary = null;
+        startNewRound();
+    });
+
+    socket.on('togglePause', () => {
+        gameState.paused = !gameState.paused;
+        addChat(`SYSTEM: ${gameState.paused ? '⏸ Gra zapauzowana.' : '▶ Gra wznowiona.'}`);
+        io.emit('stateUpdate', gameState);
     });
 });
 
@@ -270,7 +333,10 @@ function resolveTrick() {
     const winningTeam = team(winner.player);
 
     gameState.roundCardPoints[winningTeam] += trickPoints;
-    addLog(`🏆 ${gameState.players[winner.player].name} bierze lewę (${trickPoints} pkt).`);
+    gameState.tricks.push({ cards: [...gameState.trick], winner: winner.player, points: trickPoints });
+
+    addChat(`SYSTEM: 🏆 ${gameState.players[winner.player].name} zdobywa lewę za ${trickPoints} pkt.`);
+    addLog(`🏆 Lewa: ${gameState.players[winner.player].name} +${trickPoints} pkt dla Pary ${winningTeam + 1}`);
 
     gameState.trick = [];
     gameState.leader = winner.player;
@@ -290,20 +356,38 @@ function finishRound() {
         gameState.roundCardPoints[1] + gameState.melds[1]
     ];
 
-    if (rawPoints[biddingTeam] >= gameState.declared) {
+    const contractMade = rawPoints[biddingTeam] >= gameState.declared;
+    const scoreDelta = [0, 0];
+
+    if (contractMade) {
+        scoreDelta[biddingTeam] = gameState.declared;
         gameState.scores[biddingTeam] += gameState.declared;
-        addLog(`✅ Para ${biddingTeam + 1} ugrała kontrakt ${gameState.declared}`);
+        addLog(`✅ Para ${biddingTeam + 1} zrealizowała licytację +${gameState.declared}`);
     } else {
+        scoreDelta[biddingTeam] = -gameState.declared;
         gameState.scores[biddingTeam] -= gameState.declared;
-        addLog(`❌ Para ${biddingTeam + 1} spadła o ${gameState.declared}`);
+        addLog(`❌ Para ${biddingTeam + 1} nie zrealizowała licytacji -${gameState.declared}`);
     }
 
     if (gameState.scores[defendingTeam] < 800) {
+        scoreDelta[defendingTeam] = rawPoints[defendingTeam];
         gameState.scores[defendingTeam] += rawPoints[defendingTeam];
-        addLog(`➕ Para ${defendingTeam + 1} zdobywa ${rawPoints[defendingTeam]} pkt.`);
+        addLog(`➕ Para ${defendingTeam + 1} zdobywa +${rawPoints[defendingTeam]} pkt z lew i meldunków.`);
     } else {
-        addLog(`⛔ Para ${defendingTeam + 1} ma 800+ pkt — brak punktów z lew.`);
+        addLog(`⛔ Para ${defendingTeam + 1} ma 800+ — ${rawPoints[defendingTeam]} pkt nie dopisano.`);
     }
+
+    gameState.lastRoundSummary = {
+        cardPoints: [...gameState.roundCardPoints],
+        melds: [...gameState.melds],
+        rawPoints: [...rawPoints],
+        biddingTeam,
+        declared: gameState.declared,
+        contractMade,
+        scoreDelta
+    };
+
+    addChat(`SYSTEM: 📊 Koniec rozdania — Para 1: ${rawPoints[0]} pkt, Para 2: ${rawPoints[1]} pkt.`);
 
     if (gameState.scores[0] >= 1000 || gameState.scores[1] >= 1000) {
         gameState.phase = "gameover";
@@ -313,4 +397,4 @@ function finishRound() {
     io.emit('stateUpdate', gameState);
 }
 
-http.listen(3000, () => console.log('Server running on port 3000'));
+http.listen(3000, () => console.log('Server Tysiąc v7 uruchomiony na porcie 3000'));
