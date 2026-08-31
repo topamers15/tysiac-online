@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tysiąc Online</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#0d3b2e;color:#f7f0dc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .card-box{max-width:420px;margin:30px auto;padding:20px;background:#134e3e;border:2px solid #d8b35b;border-radius:12px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.4)}
+  input,button{width:100%;padding:12px;margin:8px 0;border-radius:8px;border:none;font-size:16px}
+  input{background:#08291f;color:#fff;border:1px solid #2a6e5a}
+  button{background:#d8b45b;color:#111;font-weight:bold;cursor:pointer}
+  button:active{opacity:0.8}
+  
+  .rooms-list{margin:15px 0;max-height:260px;overflow-y:auto}
+  .room-item{display:flex;justify-content:space-between;align-items:center;padding:12px;margin:8px 0;background:rgba(0,0,0,0.25);border:1px solid #2a6e5a;border-radius:8px}
+  .room-item button{width:auto;padding:8px 16px;margin:0}
+
+  .game-container{display:none;padding:12px;text-align:center}
+  .grid-players{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:15px 0}
+  .p-card{padding:10px;background:rgba(0,0,0,0.3);border-radius:8px;border:1px solid #d8b35b}
+</style>
+</head>
+<body>
+
+<div id="authScreen" class="card-box">
+  <h2>🃏 Tysiąc Online</h2>
+  <input id="userInput" placeholder="Twój Nick...">
+  <input id="pinInput" type="password" maxlength="4" placeholder="4-cyfrowy PIN...">
+  <button onclick="authenticate()">Zaloguj / Zarejestruj</button>
+</div>
+
+<div id="lobbyScreen" class="card-box" style="display:none">
+  <h2>Witaj, <span id="userDisplay"></span>!</h2>
+  <h3>Dostępne Stoły:</h3>
+  
+  <div id="roomsList" class="rooms-list">
+    <small>Ładowanie stołów...</small>
+  </div>
+
+  <button onclick="createNewRoom()" style="background:#4caf50;color:#fff">+ Stwórz nowy stół</button>
+</div>
+
+<div id="gameScreen" class="game-container">
+  <h3 id="roomTitle">Stół: -</h3>
+  <div class="grid-players" id="playersList"></div>
+  <div id="statusBox" style="margin:15px 0;font-weight:bold">Oczekiwanie na pozostałych graczy...</div>
+</div>
+
+<script>
+const socket = io();
+let currentUser = null;
+
+function authenticate(){
+  const username = document.getElementById("userInput").value.trim();
+  const pin = document.getElementById("pinInput").value.trim();
+  if(!username || !pin) return alert("Wpisz Nick i PIN!");
+
+  socket.emit('authPlayer', { username, pin }, (res) => {
+    if(res.success){
+      currentUser = res.username;
+      document.getElementById("userDisplay").textContent = currentUser;
+      document.getElementById("authScreen").style.display = "none";
+      document.getElementById("lobbyScreen").style.display = "block";
+    } else {
+      alert(res.message);
+    }
+  });
+}
+
+socket.on('roomListUpdate', (rooms) => {
+  const container = document.getElementById("roomsList");
+  container.innerHTML = "";
+
+  const defaultRooms = ["Stół #1", "Stół #2", "Stół #3", "Stół #4"];
+  const allRoomIds = Array.from(new Set([...defaultRooms, ...rooms.map(r => r.roomId)]));
+
+  allRoomIds.forEach(id => {
+    const existing = rooms.find(r => r.roomId === id);
+    const count = existing ? existing.playerCount : 0;
+    const hasPassword = existing ? existing.hasPassword : false;
+    
+    container.innerHTML += `
+      <div class="room-item">
+        <div style="text-align:left">
+          <b>${id} ${hasPassword ? '🔒' : ''}</b><br>
+          <small>Graczy: ${count}/4</small>
+        </div>
+        <button onclick="joinRoom('${id}', ${hasPassword})" ${count >= 4 ? 'disabled style="opacity:0.5"' : ''}>
+          ${count >= 4 ? 'Pełny' : 'Dołącz'}
+        </button>
+      </div>
+    `;
+  });
+});
+
+function joinRoom(roomId, hasPassword = false){
+  let password = null;
+  if(hasPassword){
+    password = prompt("Ten stół jest zabezpieczony hasłem. Podaj hasło:");
+    if(password === null) return;
+  }
+  socket.emit('joinGame', { roomId, password, username: currentUser });
+}
+
+function createNewRoom(){
+  const name = prompt("Podaj nazwę nowego stołu:");
+  if(!name || !name.trim()) return;
+
+  const password = prompt("Podaj hasło do stołu (zostaw puste, jeśli ma być publiczny):");
+  
+  socket.emit('joinGame', { 
+    roomId: name.trim().toUpperCase(), 
+    password: password ? password.trim() : null, 
+    username: currentUser 
+  });
+}
+
+socket.on('updateState', ({ room }) => {
+  document.getElementById("lobbyScreen").style.display = "none";
+  document.getElementById("gameScreen").style.display = "block";
+  document.getElementById("roomTitle").textContent = `Stół: ${room.roomId}`;
+
+  const list = document.getElementById("playersList");
+  list.innerHTML = "";
+  for(let i = 0; i < 4; i++){
+    const p = room.players[i];
+    list.innerHTML += `
+      <div class="p-card">
+        <b>${p ? p.name : 'Wolne miejsce'}</b><br>
+        <small>Para ${(i%2)+1}</small>
+      </div>
+    `;
+  }
+});
+
+socket.on('errorMsg', (msg) => alert(msg));
+</script>
+</body>
+</html>
