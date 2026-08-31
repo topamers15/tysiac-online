@@ -19,7 +19,8 @@ const Room = mongoose.model('Room', new mongoose.Schema({
   roomId: String,
   password: { type: String, default: null },
   players: Array,
-  gameState: Object
+  gameState: Object,
+  updatedAt: { type: Date, default: Date.now }
 }));
 
 const app = express();
@@ -54,7 +55,8 @@ async function broadcastRoomList() {
     const roomList = rooms.map(r => ({
       roomId: r.roomId,
       playerCount: r.players.length,
-      hasPassword: !!r.password
+      hasPassword: !!r.password,
+      updatedAt: r.updatedAt
     }));
     io.emit('roomListUpdate', roomList);
   } catch(err) {
@@ -78,6 +80,7 @@ async function leaveCurrentRoom(socket) {
         room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
       }
 
+      room.updatedAt = new Date();
       room.markModified('players');
       room.markModified('gameState');
       await room.save();
@@ -92,19 +95,54 @@ async function leaveCurrentRoom(socket) {
   }
 }
 
+// Czyszczenie nieaktywnych stołów po 1 minucie (60 sekund)
+setInterval(async () => {
+  try {
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+    const staleRooms = await Room.find({ updatedAt: { $lt: oneMinuteAgo } });
+    
+    for (let room of staleRooms) {
+      if (room.players.length > 0) {
+        room.players = [];
+        room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
+        room.updatedAt = new Date();
+        room.markModified('players');
+        room.markModified('gameState');
+        await room.save();
+        io.to(room.roomId).emit('updateState', { room });
+      }
+    }
+    if (staleRooms.length > 0) {
+      await broadcastRoomList();
+    }
+  } catch (err) {
+    console.error("Błąd podczas czyszczenia starych pokoi:", err);
+  }
+}, 15000);
+
+// Funkcja pomocnicza do sprawdzania czy gracz jest adminem
+function checkIsAdmin(username, pin) {
+  return username === 'SLIWAPARSZYWKADOROTA' && pin === '2597';
+}
+
 io.on('connection', (socket) => {
     broadcastRoomList();
 
     socket.on('authPlayer', async ({ username, pin }, callback) => {
         try {
-            let user = await User.findOne({ username: username.trim() });
+            const cleanName = username.trim();
+            const cleanPin = pin.trim();
+
+            const isAdmin = checkIsAdmin(cleanName, cleanPin);
+
+            let user = await User.findOne({ username: cleanName });
             if (!user) {
-                user = new User({ username: username.trim(), pin: pin.trim() });
+                user = new User({ username: cleanName, pin: cleanPin });
                 await user.save();
-                callback({ success: true, username: user.username });
+                callback({ success: true, username: user.username, isAdmin });
             } else {
-                if (user.pin === pin.trim()) {
-                    callback({ success: true, username: user.username });
+                if (user.pin === cleanPin) {
+                    callback({ success: true, username: user.username, isAdmin });
                 } else {
                     callback({ success: false, message: "Błędny PIN!" });
                 }
@@ -114,13 +152,52 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('joinGame', async ({ roomId, password, username }) => {
+    // Weryfikacja Admina przy przycisku resetowania czasu
+    socket.on('adminResetTimer', async ({ roomId, pin }) => {
+        if (!socket.username || !checkIsAdmin(socket.username, pin || '')) {
+            return socket.emit('errorMsg', 'Brak uprawnień administratora!');
+        }
+
+        try {
+            let room = await Room.findOne({ roomId });
+            if (room) {
+                room.updatedAt = new Date();
+                await room.save();
+                await broadcastRoomList();
+                socket.emit('errorMsg', `⏱️ Zresetowano timer dla ${roomId}! Stół nie zostanie zamknięty przez 1 minutę.`);
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    });
+
+    socket.on('resetRoom', async ({ roomId }) => {
+        try {
+            let room = await Room.findOne({ roomId });
+            if (room) {
+                room.players = [];
+                room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
+                room.updatedAt = new Date();
+                room.markModified('players');
+                room.markModified('gameState');
+                await room.save();
+                io.to(roomId).emit('updateState', { room });
+                await broadcastRoomList();
+                socket.emit('errorMsg', `Stół ${roomId} został wyczyszczony!`);
+            }
+        } catch(err) {
+            console.error(err);
+        }
+    });
+
+    socket.on('joinGame', async ({ roomId, password, username, pin }) => {
         try {
             if (socket.roomId && socket.roomId !== roomId) {
                 await leaveCurrentRoom(socket);
             }
 
             socket.username = username;
+            const isAdmin = checkIsAdmin(username, pin);
 
             let room = await Room.findOne({ roomId });
 
@@ -133,7 +210,7 @@ io.on('connection', (socket) => {
                 });
             } else {
                 const isReturning = room.players.some(p => p.name === username);
-                if (!isReturning && room.password && room.password !== (password ? password.trim() : "")) {
+                if (!isReturning && !isAdmin && room.password && room.password !== (password ? password.trim() : "")) {
                     socket.emit('errorMsg', 'Nieprawidłowe hasło!');
                     return;
                 }
@@ -142,7 +219,7 @@ io.on('connection', (socket) => {
             let existingPlayer = room.players.find(p => p.name === username);
 
             if (!existingPlayer) {
-                if (room.players.length >= 4) {
+                if (room.players.length >= 4 && !isAdmin) {
                     socket.emit('errorMsg', 'Stół jest pełny!');
                     return;
                 }
@@ -154,12 +231,12 @@ io.on('connection', (socket) => {
                 };
                 room.players.push(existingPlayer);
             } else {
-                // Gracz powraca po wyjściu/odświeżeniu
                 existingPlayer.id = socket.id;
             }
 
             socket.join(roomId);
             socket.roomId = roomId;
+            room.updatedAt = new Date();
             room.markModified('players');
             await room.save();
 
@@ -170,23 +247,22 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Celowe wyjście z użyciem przycisku
     socket.on('leaveRoom', async () => {
         await leaveCurrentRoom(socket);
         socket.emit('leftRoomSuccess');
     });
 
-    // Przy rozłączeniu (odświeżenie/zamknięcie) NIE usuwamy gracza od razu z bazy,
-    // aby mógł dołączyć ponownie do tego samego miejsca.
-    socket.on('disconnect', () => {
-        // Pozostawiamy wpis gracza w pokoju
+    socket.on('disconnect', async () => {
+        if (socket.roomId) {
+            await leaveCurrentRoom(socket);
+        }
     });
 
     socket.on('startGame', async ({ roomId }) => {
         try {
             let room = await Room.findOne({ roomId });
             if (!room || room.players.length < 4) {
-                socket.emit('errorMsg', 'Wymaganych jest 4 graczy do rozpoczęcia!');
+                socket.emit('errorMsg', 'Wymaganych jest co najmniej 4 graczy do rozpoczęcia!');
                 return;
             }
 
@@ -205,6 +281,7 @@ io.on('connection', (socket) => {
                 currentTurn: 0
             };
 
+            room.updatedAt = new Date();
             room.markModified('players');
             room.markModified('gameState');
             await room.save();
