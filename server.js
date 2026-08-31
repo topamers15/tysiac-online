@@ -1,401 +1,358 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path');
-const mongoose = require('mongoose');
-
-const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://Topamers15-Admin:Korciorze123%40@cluster0.efvy1vd.mongodb.net/?appName=Cluster0";
-
-mongoose.connect(MONGO_URI)
-  .then(() => console.log("Połączono z bazą MongoDB Atlas!"))
-  .catch(err => console.error("Błąd połączenia z bazą:", err));
-
-const User = mongoose.model('User', new mongoose.Schema({
-  username: { type: String, unique: true, required: true },
-  pin: { type: String, required: true }
-}));
-
-const Room = mongoose.model('Room', new mongoose.Schema({
-  roomId: String,
-  password: { type: String, default: null },
-  players: Array,
-  gameState: Object,
-  updatedAt: { type: Date, default: Date.now }
-}));
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname + '/public'));
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+const SUITS = [
+    { symbol: "♣", name: "Trefl", meld: 100, red: false },
+    { symbol: "♠", name: "Pik", meld: 80, red: false },
+    { symbol: "♥", name: "Kier", meld: 60, red: true },
+    { symbol: "♦", name: "Karo", meld: 40, red: true }
+];
+
+const RANKS = [
+    { rank: "A", value: 11 }, { rank: "10", value: 10 },
+    { rank: "K", value: 4 }, { rank: "Q", value: 3 },
+    { rank: "J", value: 2 }, { rank: "9", value: 0 }
+];
+
+const PLAYERS_NAMES = ["Gracz 1", "Gracz 2", "Gracz 3", "Gracz 4"];
+
+let roomState = {
+    sockets: [null, null, null, null], // socket.id dla graczy 0,1,2,3
+    gameStarted: false,
+    round: 1,
+    dealer: 0,
+    scores: [0, 0],
+    phase: "waiting", // waiting, bid, exchange, play, next, gameover
+    bidder: 1,
+    highestBid: 100,
+    highestBidder: 0,
+    openingBidder: 0,
+    passed: [],
+    declared: null,
+    musik: [],
+    trick: [],
+    tricks: [],
+    trump: null,
+    melds: [0, 0],
+    meldedSuits: [],
+    roundCardPoints: [0, 0],
+    lastRoundSummary: null,
+    chat: [],
+    log: [],
+    hands: [[], [], [], []]
+};
+
+function team(player) { return player % 2; }
 
 function createDeck() {
-  const suits = ['♠', '♥', '♦', '♣'];
-  const ranks = ['9', '10', 'J', 'Q', 'K', 'A'];
-  let deck = [];
-  for (let s of suits) {
-    for (let r of ranks) {
-      deck.push({ rank: r, suit: s, symbol: `${r}${s}` });
+    const deck = [];
+    SUITS.forEach(suit => {
+        RANKS.forEach(rank => {
+            deck.push({
+                id: Math.random().toString(36).substring(2),
+                symbol: suit.symbol, suit: suit.name,
+                rank: rank.rank, value: rank.value,
+                meld: suit.meld, red: suit.red
+            });
+        });
+    });
+    return deck.sort(() => Math.random() - 0.5);
+}
+
+function logAction(text) {
+    roomState.log.unshift(text);
+    roomState.log = roomState.log.slice(0, 20);
+}
+
+function chatMessage(text) {
+    roomState.chat.push(text);
+    roomState.chat = roomState.chat.slice(-40);
+}
+
+function dealCards() {
+    const deck = createDeck();
+    roomState.hands = [[], [], [], []];
+
+    for (let round = 0; round < 5; round++) {
+        for (let i = 0; i < 4; i++) {
+            const player = (roomState.dealer + i) % 4;
+            roomState.hands[player].push(deck.pop());
+        }
     }
-  }
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
-  }
-  return deck;
+    roomState.musik = deck.splice(0, 4);
+    roomState.hands.forEach(hand => hand.sort((a, b) => b.value - a.value));
+
+    roomState.phase = "bid";
+    roomState.openingBidder = roomState.dealer;
+    roomState.highestBid = 100;
+    roomState.highestBidder = roomState.openingBidder;
+    roomState.bidder = (roomState.openingBidder + 1) % 4;
+    roomState.passed = [];
+    roomState.declared = null;
+    roomState.trump = null;
+    roomState.trick = [];
+    roomState.tricks = [];
+    roomState.melds = [0, 0];
+    roomState.meldedSuits = [];
+    roomState.roundCardPoints = [0, 0];
+
+    chatMessage(`SYSTEM: Rozdanie ${roomState.round}. ${PLAYERS_NAMES[roomState.openingBidder]} otwiera obowiązkowym 100.`);
+    logAction(`🔨 ${PLAYERS_NAMES[roomState.openingBidder]} otwiera licytację obowiązkowym 100.`);
+    broadcastState();
 }
 
-async function broadcastRoomList() {
-  try {
-    const rooms = await Room.find({});
-    const roomList = rooms.map(r => ({
-      roomId: r.roomId,
-      playerCount: r.players.length,
-      hasPassword: !!r.password,
-      updatedAt: r.updatedAt
-    }));
-    io.emit('roomListUpdate', roomList);
-  } catch(err) {
-    console.error("Błąd przy pobieraniu listy pokoi:", err);
-  }
+function getCrossMeldCandidate(player) {
+    if (roomState.phase !== "play" || roomState.leader !== player || roomState.trick.length === 0) return null;
+    const previous = roomState.trick[roomState.trick.length - 1];
+    if (!previous || previous.player === player || previous.card.rank !== "Q" || roomState.meldedSuits.includes(previous.card.suit)) return null;
+    return roomState.hands[player].find(c => c.rank === "K" && c.suit === previous.card.suit) || null;
 }
 
-async function leaveCurrentRoom(socket) {
-  if (!socket.roomId || !socket.username) return;
+function canPlay(player, card) {
+    if (roomState.trick.length === 0) return true;
+    const leadSuit = roomState.trick[0].card.suit;
+    const hand = roomState.hands[player];
+    const hasLeadSuit = hand.some(c => c.suit === leadSuit);
 
-  try {
-    let room = await Room.findOne({ roomId: socket.roomId });
-    if (room) {
-      room.players = room.players.filter(p => p.name !== socket.username);
-      room.players.forEach((p, idx) => { p.index = idx; });
+    if (!hasLeadSuit) return true;
+    if (card.suit !== leadSuit) return false;
 
-      if (room.players.length === 0) {
-        room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
-      }
-
-      room.updatedAt = new Date();
-      room.markModified('players');
-      room.markModified('gameState');
-      await room.save();
-
-      socket.leave(socket.roomId);
-      io.to(socket.roomId).emit('updateState', { room });
-      await broadcastRoomList();
-    }
-    socket.roomId = null;
-  } catch (err) {
-    console.error("Błąd podczas opuszczania pokoju:", err);
-  }
-}
-
-setInterval(async () => {
-  try {
-    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
-    const staleRooms = await Room.find({ updatedAt: { $lt: oneMinuteAgo } });
+    const highest = roomState.trick.filter(t => t.card.suit === leadSuit).reduce((best, cur) => cur.card.value > best.card.value ? cur : best);
+    const canBeat = hand.some(c => c.suit === leadSuit && c.value > highest.card.value);
     
-    for (let room of staleRooms) {
-      if (room.players.length > 0) {
-        room.players = [];
-        room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
-        room.updatedAt = new Date();
-        room.markModified('players');
-        room.markModified('gameState');
-        await room.save();
-        io.to(room.roomId).emit('updateState', { room });
-      }
-    }
-    if (staleRooms.length > 0) {
-      await broadcastRoomList();
-    }
-  } catch (err) {
-    console.error("Błąd czyszczenia:", err);
-  }
-}, 15000);
+    if (canBeat && card.value <= highest.card.value) return false;
+    return true;
+}
 
-function checkIsAdmin(username, pin) {
-  return username === 'SLIWAPARSZYWKADOROTA' && pin === '2597';
+function registerMeld(player, suitName, kind) {
+    if (roomState.meldedSuits.includes(suitName)) return;
+    const suit = SUITS.find(s => s.name === suitName);
+    if (!suit) return;
+
+    roomState.meldedSuits.push(suitName);
+    roomState.trump = suitName;
+    roomState.melds[team(player)] += suit.meld;
+
+    chatMessage(`SYSTEM: 💍 ${PLAYERS_NAMES[player]} melduje ${kind === "cross" ? "królem na damę " : ""}${suit.name} za ${suit.meld} pkt.`);
+    logAction(`💍 ${PLAYERS_NAMES[player]} meldunek ${kind === "cross" ? "K na Q " : ""}${suit.name} +${suit.meld}`);
+}
+
+function resolveTrick() {
+    const leadSuit = roomState.trick[0].card.suit;
+    let candidates = (roomState.trump && roomState.trick.some(t => t.card.suit === roomState.trump))
+        ? roomState.trick.filter(t => t.card.suit === roomState.trump)
+        : roomState.trick.filter(t => t.card.suit === leadSuit);
+
+    const winner = candidates.reduce((best, cur) => cur.card.value > best.card.value ? cur : best);
+    const trickPoints = roomState.trick.reduce((sum, p) => sum + p.card.value, 0);
+    const winningTeam = team(winner.player);
+
+    roomState.roundCardPoints[winningTeam] += trickPoints;
+    roomState.tricks.push({ cards: [...roomState.trick], winner: winner.player, points: trickPoints });
+
+    logAction(`🏆 Lewa: ${PLAYERS_NAMES[winner.player]} +${trickPoints} pkt dla Pary ${winningTeam + 1}`);
+    roomState.trick = [];
+    roomState.leader = winner.player;
+
+    if (roomState.hands.every(h => h.length === 0)) {
+        finishRound();
+    }
+}
+
+function finishRound() {
+    const cardPoints = [...roomState.roundCardPoints];
+    const rawPoints = [cardPoints[0] + roomState.melds[0], cardPoints[1] + roomState.melds[1]];
+    const biddingTeam = team(roomState.highestBidder);
+    const defendingTeam = biddingTeam === 0 ? 1 : 0;
+    const contractMade = rawPoints[biddingTeam] >= roomState.declared;
+
+    if (contractMade) {
+        roomState.scores[biddingTeam] += roomState.declared;
+        logAction(`✅ Para ${biddingTeam + 1} zrealizowała licytację +${roomState.declared}`);
+    } else {
+        roomState.scores[biddingTeam] -= roomState.declared;
+        logAction(`❌ Para ${biddingTeam + 1} nie zrealizowała licytacji -${roomState.declared}`);
+    }
+
+    if (roomState.scores[defendingTeam] < 800) {
+        roomState.scores[defendingTeam] += rawPoints[defendingTeam];
+        logAction(`➕ Para ${defendingTeam + 1} zdobywa +${rawPoints[defendingTeam]} pkt.`);
+    }
+
+    roomState.lastRoundSummary = {
+        cardPoints, melds: [...roomState.melds], rawPoints,
+        biddingTeam, declared: roomState.declared, contractMade
+    };
+
+    if (roomState.scores[0] >= 1000 || roomState.scores[1] >= 1000) {
+        roomState.phase = "gameover";
+    } else {
+        roomState.phase = "next";
+    }
+}
+
+function getSanitizedStateFor(playerIndex) {
+    const copy = JSON.parse(JSON.stringify(roomState));
+    delete copy.sockets;
+    
+    // Przesyłaj tylko rękę gracza pytającego, reszta układów jest zakryta
+    copy.myIndex = playerIndex;
+    copy.myHand = playerIndex !== null && playerIndex !== undefined ? roomState.hands[playerIndex] : [];
+    delete copy.hands;
+
+    if (copy.phase !== "exchange") {
+        delete copy.musik; // Ukryj musik poza fazą wymiany
+    }
+    return copy;
+}
+
+function broadcastState() {
+    roomState.sockets.forEach((socId, idx) => {
+        if (socId) {
+            io.to(socId).emit('gameState', getSanitizedStateFor(idx));
+        }
+    });
 }
 
 io.on('connection', (socket) => {
-    broadcastRoomList();
+    let assignedIndex = roomState.sockets.findIndex(s => s === null);
+    if (assignedIndex !== -1) {
+        roomState.sockets[assignedIndex] = socket.id;
+        socket.emit('assignedPlayer', assignedIndex);
+        chatMessage(`SYSTEM: ${PLAYERS_NAMES[assignedIndex]} dołączył do stolu.`);
+    } else {
+        socket.emit('assignedPlayer', -1); // Spectator
+    }
 
-    socket.on('authPlayer', async ({ username, pin }, callback) => {
-        try {
-            const cleanName = username.trim();
-            const cleanPin = pin.trim();
-            const isAdmin = checkIsAdmin(cleanName, cleanPin);
+    if (roomState.sockets.filter(Boolean).length === 4 && !roomState.gameStarted) {
+        roomState.gameStarted = true;
+        dealCards();
+    } else {
+        broadcastState();
+    }
 
-            let user = await User.findOne({ username: cleanName });
-            if (!user) {
-                user = new User({ username: cleanName, pin: cleanPin });
-                await user.save();
-                callback({ success: true, username: user.username, isAdmin });
+    socket.on('bid', (amount) => {
+        if (assignedIndex !== roomState.bidder || roomState.phase !== "bid") return;
+        if (amount === 0) {
+            roomState.passed.push(assignedIndex);
+            logAction(`🔴 ${PLAYERS_NAMES[assignedIndex]} spasował.`);
+        } else if (amount > roomState.highestBid) {
+            roomState.highestBid = amount;
+            roomState.highestBidder = assignedIndex;
+            logAction(`🔨 ${PLAYERS_NAMES[assignedIndex]} licytuje ${amount}`);
+        }
+
+        const active = [0, 1, 2, 3].filter(p => !roomState.passed.includes(p));
+        if (active.length === 1) {
+            roomState.highestBidder = active[0];
+            roomState.declared = roomState.highestBid;
+            roomState.phase = "exchange";
+            roomState.bidder = -1;
+        } else {
+            let next = (assignedIndex + 1) % 4;
+            while (roomState.passed.includes(next)) next = (next + 1) % 4;
+            roomState.bidder = next;
+        }
+        broadcastState();
+    });
+
+    socket.on('exchange', (payload) => {
+        // payload: { transfers: [ { cardId, targetPlayer }, ... ] } - 3 pozycje
+        if (assignedIndex !== roomState.highestBidder || roomState.phase !== "exchange") return;
+        const { transfers } = payload;
+        if (!transfers || transfers.length !== 3) return;
+
+        transfers.forEach(tr => {
+            let cardIdx = roomState.hands[assignedIndex].findIndex(c => c.id === tr.cardId);
+            let card = null;
+            if (cardIdx !== -1) {
+                card = roomState.hands[assignedIndex].splice(cardIdx, 1)[0];
             } else {
-                if (user.pin === cleanPin) {
-                    callback({ success: true, username: user.username, isAdmin });
-                } else {
-                    callback({ success: false, message: "Błędny PIN!" });
-                }
+                cardIdx = roomState.musik.findIndex(c => c.id === tr.cardId);
+                if (cardIdx !== -1) card = roomState.musik.splice(cardIdx, 1)[0];
             }
-        } catch (err) {
-            callback({ success: false, message: "Błąd serwera." });
+            if (card) {
+                roomState.hands[tr.targetPlayer].push(card);
+                logAction(`📤 ${PLAYERS_NAMES[assignedIndex]} przekazuje ${card.rank}${card.symbol} → ${PLAYERS_NAMES[tr.targetPlayer]}`);
+            }
+        });
+
+        roomState.hands[roomState.highestBidder].push(...roomState.musik);
+        roomState.musik = [];
+        roomState.hands.forEach(h => h.sort((a, b) => b.value - a.value));
+
+        roomState.phase = "play";
+        roomState.leader = roomState.highestBidder;
+        broadcastState();
+    });
+
+    socket.on('playCard', ({ cardId, isCrossMeld }) => {
+        if (assignedIndex !== roomState.leader || roomState.phase !== "play") return;
+        const hand = roomState.hands[assignedIndex];
+        const cardIdx = hand.findIndex(c => c.id === cardId);
+        if (cardIdx === -1) return;
+
+        const card = hand[cardIdx];
+        const crossCandidate = getCrossMeldCandidate(assignedIndex);
+        const isValidCross = isCrossMeld && crossCandidate && crossCandidate.id === cardId;
+
+        if (!isValidCross && !canPlay(assignedIndex, card)) return;
+
+        hand.splice(cardIdx, 1);
+        roomState.trick.push({ player: assignedIndex, card });
+
+        if (isCrossMeld) registerMeld(assignedIndex, card.suit, "cross");
+
+        logAction(`🃏 ${PLAYERS_NAMES[assignedIndex]} zagrał ${card.rank}${card.symbol}`);
+
+        if (roomState.trick.length === 4) {
+            resolveTrick();
+        } else {
+            roomState.leader = (assignedIndex + 1) % 4;
+        }
+        broadcastState();
+    });
+
+    socket.on('makeMeld', () => {
+        if (roomState.phase !== "play" || roomState.trick.length === 0 || roomState.trick[0].player !== assignedIndex) return;
+        const firstCard = roomState.trick[0].card;
+        if (firstCard.rank !== "K" && firstCard.rank !== "Q") return;
+        
+        const counterpart = firstCard.rank === "K" ? "Q" : "K";
+        const hasCounterpart = roomState.hands[assignedIndex].some(c => c.suit === firstCard.suit && c.rank === counterpart);
+        
+        if (hasCounterpart) {
+            registerMeld(assignedIndex, firstCard.suit, "self");
+            broadcastState();
         }
     });
 
-    socket.on('adminResetTimer', async ({ roomId, pin }) => {
-        if (!socket.username || !checkIsAdmin(socket.username, pin || '')) {
-            return socket.emit('errorMsg', 'Brak uprawnień administratora!');
-        }
-        try {
-            let room = await Room.findOne({ roomId });
-            if (room) {
-                room.updatedAt = new Date();
-                await room.save();
-                await broadcastRoomList();
-                socket.emit('errorMsg', `⏱️ Zresetowano timer dla ${roomId}!`);
-            }
-        } catch (err) {
-            console.error(err);
-        }
+    socket.on('nextRound', () => {
+        if (roomState.phase !== "next") return;
+        roomState.round++;
+        roomState.dealer = (roomState.dealer + 1) % 4;
+        dealCards();
     });
 
-    socket.on('resetRoom', async ({ roomId }) => {
-        try {
-            let room = await Room.findOne({ roomId });
-            if (room) {
-                room.players = [];
-                room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
-                room.updatedAt = new Date();
-                room.markModified('players');
-                room.markModified('gameState');
-                await room.save();
-                io.to(roomId).emit('updateState', { room });
-                await broadcastRoomList();
-                socket.emit('errorMsg', `Stół ${roomId} został wyczyszczony!`);
-            }
-        } catch(err) {
-            console.error(err);
-        }
+    socket.on('sendChat', (text) => {
+        chatMessage(`${PLAYERS_NAMES[assignedIndex] || 'Widz'}: ${text}`);
+        broadcastState();
     });
 
-    socket.on('joinGame', async ({ roomId, password, username, pin }) => {
-        try {
-            if (socket.roomId && socket.roomId !== roomId) {
-                await leaveCurrentRoom(socket);
-            }
-
-            socket.username = username;
-            const isAdmin = checkIsAdmin(username, pin);
-
-            let room = await Room.findOne({ roomId });
-
-            if (!room) {
-                room = new Room({
-                    roomId: roomId,
-                    password: password ? password.trim() : null,
-                    players: [],
-                    gameState: { status: 'LOBBY', round: 1, currentTurn: 0 }
-                });
-            } else {
-                const isReturning = room.players.some(p => p.name === username);
-                if (!isReturning && !isAdmin && room.password && room.password !== (password ? password.trim() : "")) {
-                    socket.emit('errorMsg', 'Nieprawidłowe hasło!');
-                    return;
-                }
-            }
-
-            let existingPlayer = room.players.find(p => p.name === username);
-
-            if (!existingPlayer) {
-                if (room.players.length >= 4 && !isAdmin) {
-                    socket.emit('errorMsg', 'Stół jest pełny!');
-                    return;
-                }
-                existingPlayer = {
-                    id: socket.id,
-                    name: username,
-                    index: room.players.length,
-                    hand: [],
-                    score: 0
-                };
-                room.players.push(existingPlayer);
-            } else {
-                existingPlayer.id = socket.id;
-            }
-
-            socket.join(roomId);
-            socket.roomId = roomId;
-            room.updatedAt = new Date();
-            room.markModified('players');
-            await room.save();
-
-            await broadcastRoomList();
-            io.to(roomId).emit('updateState', { room });
-        } catch (err) {
-            socket.emit('errorMsg', 'Błąd podczas dołączania.');
-        }
-    });
-
-    socket.on('leaveRoom', async () => {
-        await leaveCurrentRoom(socket);
-        socket.emit('leftRoomSuccess');
-    });
-
-    socket.on('disconnect', async () => {
-        if (socket.roomId) {
-            await leaveCurrentRoom(socket);
-        }
-    });
-
-    // START GRY PRZEZ GOSPODARZA - ROZDANIE DLA WSZYSTKICH I PRZEŁĄCZENIE WIDOKU
-    socket.on('startGame', async ({ roomId }) => {
-        try {
-            let room = await Room.findOne({ roomId });
-            if (!room || room.players.length < 4) {
-                socket.emit('errorMsg', 'Wymaganych jest co najmniej 4 graczy!');
-                return;
-            }
-
-            const deck = createDeck();
-            
-            // Rozdanie kart dla 4 graczy
-            room.players[0].hand = deck.slice(0, 5);
-            room.players[1].hand = deck.slice(5, 10);
-            room.players[2].hand = deck.slice(10, 15);
-            room.players[3].hand = deck.slice(15, 20);
-            
-            room.gameState = {
-                status: 'BIDDING', // Natychmiastowe przejście do licytacji dla wszystkich
-                musik: deck.slice(20, 24),
-                currentBid: 100,
-                highestBidderIndex: 0,
-                currentTurnIndex: 0,
-                activeBidders: [0, 1, 2, 3],
-                tableCards: [],
-                trumpSuit: null,
-                declaredMeld: null
-            };
-
-            room.updatedAt = new Date();
-            room.markModified('players');
-            room.markModified('gameState');
-            await room.save();
-
-            // Emitujemy do WSZYSTKICH podłączonych graczy w pokoju
-            io.to(roomId).emit('updateState', { room });
-        } catch (err) {
-            console.error("Błąd startu gry:", err);
-        }
-    });
-
-    // LICYTACJA NA ŻYWO
-    socket.on('makeBid', async ({ roomId, action, value }) => {
-        try {
-            let room = await Room.findOne({ roomId });
-            if (!room || room.gameState.status !== 'BIDDING') return;
-
-            const state = room.gameState;
-            const playerIndex = room.players.findIndex(p => p.name === socket.username);
-
-            if (playerIndex !== state.currentTurnIndex) return;
-
-            if (action === 'BID') {
-                if (value <= state.currentBid || value % 10 !== 0) return;
-                state.currentBid = value;
-                state.highestBidderIndex = playerIndex;
-            } else if (action === 'PASS') {
-                state.activeBidders = state.activeBidders.filter(idx => idx !== playerIndex);
-            }
-
-            if (state.activeBidders.length === 1) {
-                const winnerIndex = state.activeBidders[0];
-                state.status = 'PLAYING';
-                state.currentTurnIndex = winnerIndex;
-                room.players[winnerIndex].hand.push(...state.musik);
-            } else {
-                let currentIdxInActive = state.activeBidders.indexOf(playerIndex);
-                if (action === 'PASS') {
-                    if (currentIdxInActive >= state.activeBidders.length) currentIdxInActive = 0;
-                } else {
-                    currentIdxInActive = (currentIdxInActive + 1) % state.activeBidders.length;
-                }
-                state.currentTurnIndex = state.activeBidders[currentIdxInActive];
-            }
-
-            room.updatedAt = new Date();
-            room.markModified('players');
-            room.markModified('gameState');
-            await room.save();
-
-            io.to(roomId).emit('updateState', { room });
-        } catch (err) {
-            console.error(err);
-        }
-    });
-
-    // ZAGRANIE KARTY / MELDUNEK NA ŻYWO
-    socket.on('playCard', async ({ roomId, cardSymbol, meldSuit }) => {
-        try {
-            let room = await Room.findOne({ roomId });
-            if (!room || room.gameState.status !== 'PLAYING') return;
-
-            const state = room.gameState;
-            const playerIndex = room.players.findIndex(p => p.name === socket.username);
-
-            if (playerIndex !== state.currentTurnIndex) {
-                return socket.emit('errorMsg', 'To nie Twoja kolej!');
-            }
-
-            const player = room.players[playerIndex];
-            const cardIdx = player.hand.findIndex(c => c.symbol === cardSymbol);
-
-            if (cardIdx === -1) return;
-
-            const playedCard = player.hand.splice(cardIdx, 1)[0];
-
-            if (meldSuit) {
-                const meldValues = { '♥': 100, '♦': 80, '♣': 60, '♠': 40 };
-                state.trumpSuit = meldSuit;
-                const points = meldValues[meldSuit] || 0;
-                player.score = (player.score || 0) + points;
-                state.declaredMeld = `${player.name} zameldował ${meldSuit} (+${points} pkt)! Atut: ${meldSuit}`;
-            }
-
-            state.tableCards.push({
-                playerIndex: playerIndex,
-                playerName: player.name,
-                card: playedCard
-            });
-
-            if (state.tableCards.length === 4) {
-                setTimeout(async () => {
-                    let r = await Room.findOne({ roomId });
-                    if(r){
-                        r.gameState.tableCards = [];
-                        r.markModified('gameState');
-                        await r.save();
-                        io.to(roomId).emit('updateState', { room: r });
-                    }
-                }, 2000);
-            }
-
-            state.currentTurnIndex = (state.currentTurnIndex + 1) % room.players.length;
-
-            room.updatedAt = new Date();
-            room.markModified('players');
-            room.markModified('gameState');
-            await room.save();
-
-            io.to(roomId).emit('updateState', { room });
-        } catch (err) {
-            console.error(err);
+    socket.on('disconnect', () => {
+        if (assignedIndex !== -1) {
+            roomState.sockets[assignedIndex] = null;
+            chatMessage(`SYSTEM: ${PLAYERS_NAMES[assignedIndex]} rozłączył się.`);
+            broadcastState();
         }
     });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Serwer działa na porcie ${PORT}`));
+server.listen(3000, () => console.log('Serwer Tysiąca działa na porcie 3000'));
