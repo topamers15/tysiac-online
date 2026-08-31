@@ -4,7 +4,6 @@ const { Server } = require('socket.io');
 const path = require('path');
 const mongoose = require('mongoose');
 
-// Wklejony Twój link połączeniowy do MongoDB Atlas
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://Topamers15-Admin:Korciorze123%40@cluster0.efvy1vd.mongodb.net/?appName=Cluster0";
 
 mongoose.connect(MONGO_URI)
@@ -28,6 +27,28 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Funkcja pomocnicza do generowania i tasowania talii (24 karty: 9, 10, J, Q, K, A)
+function createDeck() {
+  const suits = ['♠', '♥', '♦', '♣'];
+  const ranks = ['9', '10', 'J', 'Q', 'K', 'A'];
+  let deck = [];
+  for (let s of suits) {
+    for (let r of ranks) {
+      deck.push({ rank: r, suit: s, symbol: `${r}${s}` });
+    }
+  }
+  // Tasowanie
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
 
 async function broadcastRoomList() {
   try {
@@ -61,7 +82,7 @@ io.on('connection', (socket) => {
                 }
             }
         } catch (err) {
-            callback({ success: false, message: "Błąd serwera przy autoryzacji." });
+            callback({ success: false, message: "Błąd serwera." });
         }
     });
 
@@ -74,12 +95,12 @@ io.on('connection', (socket) => {
                     roomId: roomId,
                     password: password ? password.trim() : null,
                     players: [],
-                    gameState: { round: 1, dealer: 0, scores: [0, 0], phase: "lobby", highestBid: 100 }
+                    gameState: { status: 'LOBBY', round: 1, currentTurn: 0 }
                 });
             } else {
                 const isReturning = room.players.some(p => p.name === username);
                 if (!isReturning && room.password && room.password !== (password ? password.trim() : "")) {
-                    socket.emit('errorMsg', 'Nieprawidłowe hasło do tego stołu!');
+                    socket.emit('errorMsg', 'Nieprawidłowe hasło!');
                     return;
                 }
             }
@@ -88,7 +109,7 @@ io.on('connection', (socket) => {
 
             if (!existingPlayer) {
                 if (room.players.length >= 4) {
-                    socket.emit('errorMsg', 'Ten stół jest już pełny!');
+                    socket.emit('errorMsg', 'Stół jest pełny!');
                     return;
                 }
                 existingPlayer = {
@@ -110,10 +131,45 @@ io.on('connection', (socket) => {
             await broadcastRoomList();
             io.to(roomId).emit('updateState', { room });
         } catch (err) {
-            socket.emit('errorMsg', 'Błąd podczas dołączania do pokoju.');
+            socket.emit('errorMsg', 'Błąd podczas dołączania.');
+        }
+    });
+
+    // Start Rozgrywki przez Gospodarza
+    socket.on('startGame', async ({ roomId }) => {
+        try {
+            let room = await Room.findOne({ roomId });
+            if (!room || room.players.length < 4) {
+                socket.emit('errorMsg', 'Wymaganych jest 4 graczy do rozpoczęcia!');
+                return;
+            }
+
+            const deck = createDeck();
+            
+            // Rozdanie kart (po 5 kart dla każdego gracza + 4 do musika)
+            room.players[0].hand = deck.slice(0, 5);
+            room.players[1].hand = deck.slice(5, 10);
+            room.players[2].hand = deck.slice(10, 15);
+            room.players[3].hand = deck.slice(15, 20);
+            
+            room.gameState = {
+                status: 'BIDDING', // Faza licytacji
+                musik: deck.slice(20, 24),
+                currentBid: 100,
+                highestBidder: 0,
+                currentTurn: 0
+            };
+
+            room.markModified('players');
+            room.markModified('gameState');
+            await room.save();
+
+            io.to(roomId).emit('updateState', { room });
+        } catch (err) {
+            console.error("Błąd startu gry:", err);
         }
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Serwer uruchomiony na porcie ${PORT}`));
+server.listen(PORT, () => console.log(`Serwer działa na porcie ${PORT}`));
