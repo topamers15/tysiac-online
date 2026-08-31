@@ -32,7 +32,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Funkcja pomocnicza do generowania i tasowania talii (24 karty: 9, 10, J, Q, K, A)
 function createDeck() {
   const suits = ['♠', '♥', '♦', '♣'];
   const ranks = ['9', '10', 'J', 'Q', 'K', 'A'];
@@ -71,12 +70,10 @@ async function leaveCurrentRoom(socket) {
     if (room) {
       room.players = room.players.filter(p => p.name !== socket.username);
 
-      // Re-indeksacja graczy przy stole
       room.players.forEach((p, idx) => {
         p.index = idx;
       });
 
-      // Jeśli stół jest pusty, zrestartuj jego stan
       if (room.players.length === 0) {
         room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
       }
@@ -119,7 +116,6 @@ io.on('connection', (socket) => {
 
     socket.on('joinGame', async ({ roomId, password, username }) => {
         try {
-            // Jeśli gracz jest już w innym pokoju, usuń go stamtąd
             if (socket.roomId && socket.roomId !== roomId) {
                 await leaveCurrentRoom(socket);
             }
@@ -158,6 +154,7 @@ io.on('connection', (socket) => {
                 };
                 room.players.push(existingPlayer);
             } else {
+                // Gracz powraca po wyjściu/odświeżeniu
                 existingPlayer.id = socket.id;
             }
 
@@ -173,17 +170,18 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Celowe wyjście z użyciem przycisku
     socket.on('leaveRoom', async () => {
         await leaveCurrentRoom(socket);
         socket.emit('leftRoomSuccess');
     });
 
-    socket.on('disconnect', async () => {
-        // Jeśli rozłączyło gracza (zamknięcie karty/brak internetu)
-        await leaveCurrentRoom(socket);
+    // Przy rozłączeniu (odświeżenie/zamknięcie) NIE usuwamy gracza od razu z bazy,
+    // aby mógł dołączyć ponownie do tego samego miejsca.
+    socket.on('disconnect', () => {
+        // Pozostawiamy wpis gracza w pokoju
     });
 
-    // Start Rozgrywki przez Gospodarza
     socket.on('startGame', async ({ roomId }) => {
         try {
             let room = await Room.findOne({ roomId });
@@ -194,14 +192,13 @@ io.on('connection', (socket) => {
 
             const deck = createDeck();
             
-            // Rozdanie kart (po 5 kart dla każdego gracza + 4 do musika)
             room.players[0].hand = deck.slice(0, 5);
             room.players[1].hand = deck.slice(5, 10);
             room.players[2].hand = deck.slice(10, 15);
             room.players[3].hand = deck.slice(15, 20);
             
             room.gameState = {
-                status: 'BIDDING', // Faza licytacji
+                status: 'BIDDING',
                 musik: deck.slice(20, 24),
                 currentBid: 100,
                 highestBidder: 0,
