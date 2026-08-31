@@ -24,12 +24,12 @@ const RANKS = [
 const PLAYERS_NAMES = ["Gracz 1", "Gracz 2", "Gracz 3", "Gracz 4"];
 
 let roomState = {
-    sockets: [null, null, null, null], // socket.id dla graczy 0,1,2,3
+    sockets: [null, null, null, null],
     gameStarted: false,
     round: 1,
     dealer: 0,
     scores: [0, 0],
-    phase: "waiting", // waiting, bid, exchange, play, next, gameover
+    phase: "waiting",
     bidder: 1,
     highestBid: 100,
     highestBidder: 0,
@@ -202,13 +202,12 @@ function getSanitizedStateFor(playerIndex) {
     const copy = JSON.parse(JSON.stringify(roomState));
     delete copy.sockets;
     
-    // Przesyłaj tylko rękę gracza pytającego, reszta układów jest zakryta
     copy.myIndex = playerIndex;
     copy.myHand = playerIndex !== null && playerIndex !== undefined ? roomState.hands[playerIndex] : [];
     delete copy.hands;
 
     if (copy.phase !== "exchange") {
-        delete copy.musik; // Ukryj musik poza fazą wymiany
+        delete copy.musik;
     }
     return copy;
 }
@@ -226,9 +225,9 @@ io.on('connection', (socket) => {
     if (assignedIndex !== -1) {
         roomState.sockets[assignedIndex] = socket.id;
         socket.emit('assignedPlayer', assignedIndex);
-        chatMessage(`SYSTEM: ${PLAYERS_NAMES[assignedIndex]} dołączył do stolu.`);
+        chatMessage(`SYSTEM: ${PLAYERS_NAMES[assignedIndex]} dołączył do stołu.`);
     } else {
-        socket.emit('assignedPlayer', -1); // Spectator
+        socket.emit('assignedPlayer', -1);
     }
 
     if (roomState.sockets.filter(Boolean).length === 4 && !roomState.gameStarted) {
@@ -264,7 +263,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('exchange', (payload) => {
-        // payload: { transfers: [ { cardId, targetPlayer }, ... ] } - 3 pozycje
         if (assignedIndex !== roomState.highestBidder || roomState.phase !== "exchange") return;
         const { transfers } = payload;
         if (!transfers || transfers.length !== 3) return;
@@ -355,4 +353,5 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(3000, () => console.log('Serwer Tysiąca działa na porcie 3000'));
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Serwer działa na porcie ${PORT}`));
