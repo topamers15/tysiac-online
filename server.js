@@ -26,7 +26,7 @@ let gameState = {
     dealer: 0,
     scores: [0, 0],
     phase: "waiting", // waiting, bid, exchange, play, next, gameover
-    players: [], // { id, name, hand, seat }
+    players: [], // { id, name, hand, seat, isHost, isBot }
     highestBid: 100,
     highestBidder: 0,
     openingBidder: 0,
@@ -64,9 +64,7 @@ function createDeck() {
     return deck.sort(() => Math.random() - 0.5);
 }
 
-function team(seat) {
-    return seat % 2;
-}
+function team(seat) { return seat % 2; }
 
 function addLog(msg) {
     gameState.log.unshift(msg);
@@ -78,11 +76,16 @@ function addChat(text) {
     gameState.chat = gameState.chat.slice(-40);
 }
 
+function updateHosts() {
+    gameState.players.forEach((p, index) => {
+        p.isHost = (index === 0 && !p.isBot);
+    });
+}
+
 function startNewRound() {
     const deck = createDeck();
     gameState.players.forEach(p => p.hand = []);
 
-    // Każdy po 5 kart
     for (let round = 0; round < 5; round++) {
         for (let i = 0; i < 4; i++) {
             const playerIndex = (gameState.dealer + i) % 4;
@@ -90,12 +93,8 @@ function startNewRound() {
         }
     }
 
-    // 4 karty do musika
     gameState.musik = deck.splice(0, 4);
-
-    gameState.players.forEach(p => {
-        p.hand.sort((a, b) => b.value - a.value);
-    });
+    gameState.players.forEach(p => p.hand.sort((a, b) => b.value - a.value));
 
     gameState.phase = "bid";
     gameState.openingBidder = gameState.dealer;
@@ -116,11 +115,11 @@ function startNewRound() {
     addLog(`🎴 Rozdano karty.`);
 
     io.emit('stateUpdate', gameState);
+    checkBotTurn();
 }
 
 function canPlayCard(seat, card) {
     if (gameState.trick.length === 0) return true;
-
     const leadSuit = gameState.trick[0].card.suit;
     const hand = gameState.players[seat].hand;
     const hasLeadSuit = hand.some(c => c.suit === leadSuit);
@@ -146,14 +145,251 @@ function getCrossMeldCandidate(seat) {
     return gameState.players[seat].hand.find(c => c.rank === "K" && c.suit === previous.card.suit) || null;
 }
 
+// ================= LOgiKA BOTA =================
+
+function checkBotTurn() {
+    if (gameState.paused) return;
+
+    if (gameState.phase === "bid") {
+        const currentBidder = gameState.players[gameState.bidder];
+        if (currentBidder && currentBidder.isBot && !gameState.passed.includes(currentBidder.seat)) {
+            setTimeout(() => botProcessBid(currentBidder.seat), 1000);
+        }
+    } else if (gameState.phase === "exchange") {
+        const bidder = gameState.players[gameState.highestBidder];
+        if (bidder && bidder.isBot) {
+            setTimeout(() => botProcessExchange(bidder.seat), 1000);
+        }
+    } else if (gameState.phase === "play") {
+        const leader = gameState.players[gameState.leader];
+        if (leader && leader.isBot && gameState.trick.length < 4) {
+            setTimeout(() => botProcessPlay(leader.seat), 1000);
+        }
+    } else if (gameState.phase === "next") {
+        const anyBot = gameState.players.some(p => p.isBot);
+        if (anyBot) {
+            setTimeout(() => {
+                if (gameState.phase === "next") {
+                    gameState.round++;
+                    gameState.dealer = (gameState.dealer + 1) % 4;
+                    startNewRound();
+                }
+            }, 2500);
+        }
+    }
+}
+
+function evaluateBotHand(seat) {
+    const hand = gameState.players[seat].hand;
+    let evalScore = 120; // Baza
+
+    // Szukaj meldunków
+    SUITS.forEach(s => {
+        const hasK = hand.some(c => c.suit === s.name && c.rank === "K");
+        const hasQ = hand.some(c => c.suit === s.name && c.rank === "Q");
+        if (hasK && hasQ) evalScore += s.meld;
+    });
+
+    // Zlicz Asy
+    const aces = hand.filter(c => c.rank === "A").length;
+    evalScore += (aces * 10);
+
+    return evalScore;
+}
+
+function botProcessBid(seat) {
+    if (gameState.phase !== "bid" || gameState.bidder !== seat) return;
+
+    const maxBid = evaluateBotHand(seat);
+    const nextBid = gameState.highestBid + 10;
+
+    if (nextBid <= maxBid && nextBid <= 180) {
+        handleBid(seat, nextBid);
+    } else {
+        handleBid(seat, 0); // Pas
+    }
+}
+
+function botProcessExchange(seat) {
+    if (gameState.phase !== "exchange" || gameState.highestBidder !== seat) return;
+
+    const bot = gameState.players[seat];
+    const allCards = [...bot.hand, ...gameState.musik];
+    
+    // Sortuj karty od najsłabszej (po wartości punktowej)
+    allCards.sort((a, b) => a.value - b.value);
+
+    // Wybierz 3 najsłabsze karty do oddania
+    const selectedIds = allCards.slice(0, 3).map(c => c.id);
+    const otherSeats = [0, 1, 2, 3].filter(s => s !== seat);
+
+    handleExchange(seat, selectedIds, otherSeats);
+}
+
+function botProcessPlay(seat) {
+    if (gameState.phase !== "play" || gameState.leader !== seat) return;
+
+    const hand = gameState.players[seat].hand;
+    if (hand.length === 0) return;
+
+    // 1. Sprawdź opcję Meldunku
+    if (gameState.trick.length === 0) {
+        for (let suitObj of SUITS) {
+            if (!gameState.meldedSuits.includes(suitObj.name)) {
+                const k = hand.find(c => c.suit === suitObj.name && c.rank === "K");
+                const q = hand.find(c => c.suit === suitObj.name && c.rank === "Q");
+                if (k && q) {
+                    handlePlayCard(seat, k.id, false);
+                    setTimeout(() => {
+                        if (gameState.trick.length === 1 && gameState.trick[0].player === seat) {
+                            gameState.meldedSuits.push(suitObj.name);
+                            gameState.trump = suitObj.name;
+                            gameState.melds[team(seat)] += suitObj.meld;
+                            addChat(`SYSTEM: 💍 ${gameState.players[seat].name} (BOT) melduje ${suitObj.name} za ${suitObj.meld} pkt.`);
+                            addLog(`💍 ${gameState.players[seat].name} (BOT) meldunek ${suitObj.name} +${suitObj.meld}`);
+                            io.emit('stateUpdate', gameState);
+                        }
+                    }, 300);
+                    return;
+                }
+            }
+        }
+    }
+
+    // 2. Znajdź legalną kartę do wyjścia
+    let validCard = hand.find(c => canPlayCard(seat, c));
+    if (!validCard) validCard = hand[0];
+
+    handlePlayCard(seat, validCard.id, false);
+}
+
+// ================= AKCJE GRY =================
+
+function handleBid(seat, amount) {
+    if (gameState.phase !== "bid" || gameState.bidder !== seat || gameState.passed.includes(seat) || gameState.paused) return;
+
+    if (amount === 0) {
+        gameState.passed.push(seat);
+        addChat(`${gameState.players[seat].name}: 🔴 PAS — wycofuje się z licytacji.`);
+        addLog(`🔴 ${gameState.players[seat].name} spasował.`);
+    } else {
+        if (amount <= gameState.highestBid) return;
+        gameState.highestBid = amount;
+        gameState.highestBidder = seat;
+        addLog(`🔨 ${gameState.players[seat].name} licytuje ${amount}`);
+    }
+
+    const active = [0, 1, 2, 3].filter(p => !gameState.passed.includes(p));
+    if (active.length === 1) {
+        const winner = active[0];
+        gameState.highestBidder = winner;
+        gameState.declared = gameState.highestBid;
+        gameState.phase = "exchange";
+        gameState.bidder = -1;
+        addChat(`SYSTEM: ${gameState.players[winner].name} wygrywa licytację za ${gameState.highestBid}. Musik widoczny dla wszystkich.`);
+    } else {
+        let next = (seat + 1) % 4;
+        while (gameState.passed.includes(next)) {
+            next = (next + 1) % 4;
+        }
+        gameState.bidder = next;
+    }
+    io.emit('stateUpdate', gameState);
+    checkBotTurn();
+}
+
+function handleExchange(seat, selectedIds, recipients) {
+    if (gameState.phase !== "exchange" || gameState.highestBidder !== seat || gameState.paused) return;
+    if (selectedIds.length !== 3) return;
+
+    const p = gameState.players[seat];
+
+    selectedIds.forEach((id, index) => {
+        const target = recipients[index];
+        let card = null;
+
+        let cardIndex = p.hand.findIndex(c => c.id === id);
+        if (cardIndex >= 0) {
+            card = p.hand.splice(cardIndex, 1)[0];
+        } else {
+            let mIndex = gameState.musik.findIndex(c => c.id === id);
+            if (mIndex >= 0) card = gameState.musik.splice(mIndex, 1)[0];
+        }
+
+        if (card) {
+            gameState.players[target].hand.push(card);
+            addLog(`📤 ${p.name} przekazuje ${card.rank}${card.symbol} → ${gameState.players[target].name}`);
+        }
+    });
+
+    p.hand.push(...gameState.musik);
+    gameState.musik = [];
+    gameState.players.forEach(pl => pl.hand.sort((a, b) => b.value - a.value));
+
+    gameState.phase = "play";
+    gameState.leader = gameState.highestBidder;
+    addChat(`SYSTEM: Wymiana zakończona. Rozpoczyna ${gameState.players[gameState.leader].name}.`);
+    io.emit('stateUpdate', gameState);
+    checkBotTurn();
+}
+
+function handlePlayCard(seat, cardId, crossMeld) {
+    if (gameState.phase !== "play" || gameState.leader !== seat || gameState.paused) return;
+
+    const p = gameState.players[seat];
+    const cardIndex = p.hand.findIndex(c => c.id === cardId);
+    if (cardIndex < 0) return;
+
+    const card = p.hand[cardIndex];
+    const isCrossCandidate = getCrossMeldCandidate(seat)?.id === cardId;
+
+    if (!crossMeld || !isCrossCandidate) {
+        if (!canPlayCard(seat, card)) return;
+    }
+
+    p.hand.splice(cardIndex, 1);
+    gameState.trick.push({ player: seat, card });
+
+    if (crossMeld && isCrossCandidate) {
+        gameState.meldedSuits.push(card.suit);
+        gameState.trump = card.suit;
+        const suitObj = SUITS.find(s => s.name === card.suit);
+        gameState.melds[team(seat)] += suitObj.meld;
+        addChat(`SYSTEM: 💍 ${p.name} melduje królem na damę ${card.suit} za ${suitObj.meld} pkt.`);
+        addLog(`💍 ${p.name} meldunek K na Q ${card.suit} +${suitObj.meld}`);
+    }
+
+    addLog(`🃏 ${p.name} zagrał ${card.rank}${card.symbol}`);
+
+    if (gameState.trick.length === 4) {
+        io.emit('stateUpdate', gameState);
+        setTimeout(resolveTrick, 800);
+    } else {
+        gameState.leader = (seat + 1) % 4;
+        io.emit('stateUpdate', gameState);
+        checkBotTurn();
+    }
+}
+
 io.on('connection', (socket) => {
     socket.on('joinGame', (name) => {
+        let existingPlayer = gameState.players.find(p => p.name === name);
+
+        if (existingPlayer) {
+            existingPlayer.id = socket.id;
+            socket.emit('assignedSeat', existingPlayer.seat);
+            addChat(`SYSTEM: ${name} powrócił do gry.`);
+            io.emit('stateUpdate', gameState);
+            return;
+        }
+
         if (gameState.players.length < 4) {
             const seat = gameState.players.length;
-            gameState.players.push({ id: socket.id, name, seat, hand: [] });
+            const isHost = seat === 0;
+            gameState.players.push({ id: socket.id, name, seat, hand: [], isHost, isBot: false });
             socket.emit('assignedSeat', seat);
             
-            addChat(`SYSTEM: Dołączył ${name} (Gracz ${seat + 1}).`);
+            addChat(`SYSTEM: Dołączył ${name} (Gracz ${seat + 1})${isHost ? ' [HOST]' : ''}.`);
 
             if (gameState.players.length === 4) {
                 startNewRound();
@@ -165,107 +401,69 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('bid', ({ seat, amount }) => {
-        if (gameState.phase !== "bid" || gameState.bidder !== seat || gameState.passed.includes(seat) || gameState.paused) return;
+    socket.on('addBot', () => {
+        const hostPlayer = gameState.players.find(p => p.id === socket.id);
+        if (!hostPlayer || !hostPlayer.isHost) return;
 
-        if (amount === 0) {
-            gameState.passed.push(seat);
-            addChat(`${gameState.players[seat].name}: 🔴 PAS — wycofuje się z licytacji.`);
-            addLog(`🔴 ${gameState.players[seat].name} spasował.`);
-        } else {
-            if (amount <= gameState.highestBid) return;
-            gameState.highestBid = amount;
-            gameState.highestBidder = seat;
-            addLog(`🔨 ${gameState.players[seat].name} licytuje ${amount}`);
-        }
+        if (gameState.players.length < 4) {
+            const seat = gameState.players.length;
+            const botName = `Bot_${seat + 1}`;
+            gameState.players.push({ id: `bot_${Math.random()}`, name: botName, seat, hand: [], isHost: false, isBot: true });
+            addChat(`SYSTEM: 🤖 Dodano ${botName}.`);
 
-        const active = [0, 1, 2, 3].filter(p => !gameState.passed.includes(p));
-        if (active.length === 1) {
-            const winner = active[0];
-            gameState.highestBidder = winner;
-            gameState.declared = gameState.highestBid;
-            gameState.phase = "exchange";
-            gameState.bidder = -1;
-            addChat(`SYSTEM: ${gameState.players[winner].name} wygrywa licytację za ${gameState.highestBid}. Musik widoczny dla wszystkich.`);
-        } else {
-            let next = (seat + 1) % 4;
-            while (gameState.passed.includes(next)) {
-                next = (next + 1) % 4;
-            }
-            gameState.bidder = next;
-        }
-        io.emit('stateUpdate', gameState);
-    });
-
-    socket.on('exchangeCards', ({ seat, selectedIds, recipients }) => {
-        if (gameState.phase !== "exchange" || gameState.highestBidder !== seat || gameState.paused) return;
-        if (selectedIds.length !== 3) return;
-
-        const p = gameState.players[seat];
-
-        selectedIds.forEach((id, index) => {
-            const target = recipients[index];
-            let card = null;
-
-            let cardIndex = p.hand.findIndex(c => c.id === id);
-            if (cardIndex >= 0) {
-                card = p.hand.splice(cardIndex, 1)[0];
+            if (gameState.players.length === 4) {
+                startNewRound();
             } else {
-                let mIndex = gameState.musik.findIndex(c => c.id === id);
-                if (mIndex >= 0) card = gameState.musik.splice(mIndex, 1)[0];
+                io.emit('stateUpdate', gameState);
             }
-
-            if (card) {
-                gameState.players[target].hand.push(card);
-                addLog(`📤 ${p.name} przekazuje ${card.rank}${card.symbol} → ${gameState.players[target].name}`);
-            }
-        });
-
-        p.hand.push(...gameState.musik);
-        gameState.musik = [];
-        gameState.players.forEach(pl => pl.hand.sort((a, b) => b.value - a.value));
-
-        gameState.phase = "play";
-        gameState.leader = gameState.highestBidder;
-        addChat(`SYSTEM: Wymiana zakończona. Rozpoczyna ${gameState.players[gameState.leader].name}.`);
-        io.emit('stateUpdate', gameState);
+        }
     });
 
-    socket.on('playCard', ({ seat, cardId, crossMeld }) => {
-        if (gameState.phase !== "play" || gameState.leader !== seat || gameState.paused) return;
+    socket.on('kickPlayer', (targetSeat) => {
+        const hostPlayer = gameState.players.find(p => p.id === socket.id);
+        if (!hostPlayer || !hostPlayer.isHost) return;
 
-        const p = gameState.players[seat];
-        const cardIndex = p.hand.findIndex(c => c.id === cardId);
-        if (cardIndex < 0) return;
+        const kicked = gameState.players[targetSeat];
+        if (kicked && targetSeat !== hostPlayer.seat) {
+            addChat(`SYSTEM: ⛔ ${kicked.name} został usunięty przez Hosta.`);
+            addLog(`⛔ Usunięto: ${kicked.name}`);
 
-        const card = p.hand[cardIndex];
+            if (!kicked.isBot) {
+                io.to(kicked.id).emit('kicked');
+            }
 
-        const isCrossCandidate = getCrossMeldCandidate(seat)?.id === cardId;
-        if (!crossMeld || !isCrossCandidate) {
-            if (!canPlayCard(seat, card)) return;
+            gameState.players.splice(targetSeat, 1);
+            gameState.players.forEach((p, idx) => p.seat = idx);
+            updateHosts();
+
+            if (gameState.phase !== "waiting") {
+                gameState.phase = "waiting";
+                gameState.scores = [0, 0];
+                addChat(`SYSTEM: Gra została zresetowana.`);
+            }
+
+            io.emit('stateUpdate', gameState);
         }
-
-        p.hand.splice(cardIndex, 1);
-        gameState.trick.push({ player: seat, card });
-
-        if (crossMeld && isCrossCandidate) {
-            gameState.meldedSuits.push(card.suit);
-            gameState.trump = card.suit;
-            const suitObj = SUITS.find(s => s.name === card.suit);
-            gameState.melds[team(seat)] += suitObj.meld;
-            addChat(`SYSTEM: 💍 ${p.name} melduje królem na damę ${card.suit} za ${suitObj.meld} pkt.`);
-            addLog(`💍 ${p.name} meldunek K na Q ${card.suit} +${suitObj.meld}`);
-        }
-
-        addLog(`🃏 ${p.name} zagrał ${card.rank}${card.symbol}`);
-
-        if (gameState.trick.length === 4) {
-            setTimeout(resolveTrick, 800);
-        } else {
-            gameState.leader = (seat + 1) % 4;
-        }
-        io.emit('stateUpdate', gameState);
     });
+
+    socket.on('disconnect', () => {
+        const playerIndex = gameState.players.findIndex(p => p.id === socket.id);
+        if (playerIndex !== -1) {
+            const player = gameState.players[playerIndex];
+            addChat(`SYSTEM: ${player.name} rozłączył się.`);
+            
+            if (gameState.phase === "waiting") {
+                gameState.players.splice(playerIndex, 1);
+                gameState.players.forEach((p, index) => p.seat = index);
+                updateHosts();
+            }
+            io.emit('stateUpdate', gameState);
+        }
+    });
+
+    socket.on('bid', ({ seat, amount }) => handleBid(seat, amount));
+    socket.on('exchangeCards', ({ seat, selectedIds, recipients }) => handleExchange(seat, selectedIds, recipients));
+    socket.on('playCard', ({ seat, cardId, crossMeld }) => handlePlayCard(seat, cardId, crossMeld));
 
     socket.on('makeMeld', ({ seat }) => {
         if (gameState.phase !== "play" || gameState.trick.length === 0 || gameState.trick[0].player !== seat || gameState.paused) return;
@@ -315,6 +513,7 @@ io.on('connection', (socket) => {
         gameState.paused = !gameState.paused;
         addChat(`SYSTEM: ${gameState.paused ? '⏸ Gra zapauzowana.' : '▶ Gra wznowiona.'}`);
         io.emit('stateUpdate', gameState);
+        checkBotTurn();
     });
 });
 
@@ -345,6 +544,7 @@ function resolveTrick() {
         finishRound();
     } else {
         io.emit('stateUpdate', gameState);
+        checkBotTurn();
     }
 }
 
@@ -395,6 +595,7 @@ function finishRound() {
         gameState.phase = "next";
     }
     io.emit('stateUpdate', gameState);
+    checkBotTurn();
 }
 
 http.listen(3000, () => console.log('Server Tysiąc v7 uruchomiony na porcie 3000'));
