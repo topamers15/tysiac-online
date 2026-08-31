@@ -2,62 +2,129 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tysiąc – Gra Parami Multi</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Tysiąc – Gra Parami Multi v7</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#083d30;color:#f7f0dc;font-family:Arial,sans-serif}
-button,select{font:inherit;border:0;border-radius:8px;padding:8px 12px;background:#d8b45b;color:#21190d;font-weight:bold;cursor:pointer}
-button:hover{filter:brightness(1.1)}
+button,select,input{font:inherit}
+button{border:0;border-radius:9px;padding:9px 12px;background:#d8b45b;color:#21190d;font-weight:bold;cursor:pointer}
+button:hover{filter:brightness(1.08)}
 button:disabled{opacity:.4;cursor:default}
-.layout{max-width:1400px;margin:auto;padding:12px;display:grid;grid-template-columns:1fr 300px;gap:12px}
-.table{position:relative;height:720px;border:2px solid #b9954c;border-radius:20px;background:radial-gradient(ellipse at center, #12664c 0%, #062b23 100%)}
-.player{position:absolute;width:160px;padding:8px;text-align:center;background:rgba(0,0,0,.4);border-radius:10px}
+.top{max-width:1450px;margin:auto;padding:12px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.brand{font-size:23px;font-weight:900}
+.sub{font-size:11px;opacity:.7;margin-top:3px}
+.layout{max-width:1450px;margin:auto;padding:0 12px 12px;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px}
+.table{position:relative;height:780px;overflow:hidden;border:2px solid #b9954c;border-radius:24px;background:radial-gradient(ellipse at center, #12664c 0%, #0b4938 52%, #062b23 100%)}
+.player{position:absolute;width:180px;padding:8px;text-align:center;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);border-radius:12px}
 .player.active{outline:3px solid #e8ca72}
 .player-0{left:50%;bottom:10px;transform:translateX(-50%)}
 .player-2{left:50%;top:10px;transform:translateX(-50%)}
 .player-1{left:10px;top:50%;transform:translateY(-50%)}
 .player-3{right:10px;top:50%;transform:translateY(-50%)}
-.center{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;width:400px}
-.hand{position:absolute;left:50%;bottom:90px;transform:translateX(-50%);display:flex;gap:6px}
-.card{width:64px;height:90px;background:#fff9eb;color:#15120e;border:2px solid #d5c8aa;border-radius:6px;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;font-weight:bold;cursor:pointer}
+.center{position:absolute;left:50%;top:50%;width:430px;transform:translate(-50%,-50%);text-align:center}
+.status{padding:11px;background:rgba(0,0,0,.4);border-radius:12px}
+.musik{min-height:105px;display:flex;justify-content:center;align-items:center;gap:5px}
+.trick{min-height:160px;display:flex;justify-content:center;align-items:center;gap:9px}
+.trick-player{display:flex;flex-direction:column;align-items:center}
+.card{width:68px;height:94px;background:#fff9eb;color:#15120e;border:2px solid #d5c8aa;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:900;box-shadow:0 4px 10px rgba(0,0,0,.35)}
 .card.red{color:#a51e25}
-.card.selected{outline:3px solid #e8ca72;transform:translateY(-8px)}
-.side{background:#07352b;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:10px}
-.box{background:rgba(0,0,0,.2);padding:10px;border-radius:8px}
-.pass-btn{background:#a83333;color:#fff;width:100%;margin-bottom:6px}
-.bid-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.card-back{width:18px;height:27px;margin:2px;display:inline-flex;align-items:center;justify-content:center;background:#244f7e;color:white;border:2px solid #d7c69c;border-radius:4px}
+.hand{position:absolute;left:50%;bottom:105px;transform:translateX(-50%);display:flex;gap:6px}
+.hand .card{width:74px;height:102px;cursor:pointer;transition:transform .12s}
+.hand .card:hover{transform:translateY(-7px)}
+.hand .selected{outline:3px solid #e8ca72;transform:translateY(-9px)}
+.hand .card.cross-meld-ready{outline:3px solid #f4cf62;box-shadow:0 0 0 3px rgba(138,106,32,.55),0 4px 10px rgba(0,0,0,.35)}
+.side{background:#07352b;border:1px solid rgba(255,255,255,.1);border-radius:15px;padding:10px;display:flex;flex-direction:column;gap:9px}
+.box{background:rgba(0,0,0,.2);border-radius:12px;padding:10px}
+.scoreline{display:flex;justify-content:space-between;margin:5px 0}
+.log{max-height:130px;overflow:auto;font-size:12px}
+.chat{height:170px;overflow:auto}
+.chatbar{display:flex;gap:5px}
+.chatbar input{flex:1;min-width:0;padding:8px;border:0;border-radius:8px}
+#controls.bid-dock{position:absolute;left:50%;top:52px;width:430px;transform:translateX(-50%);z-index:8;padding:8px;background:rgba(5,35,28,.94);border:1px solid rgba(232,202,114,.55);border-radius:12px}
+#controls.exchange-dock{position:absolute;left:50%;bottom:calc(100% + 12px);width:430px;transform:translateX(-50%);z-index:9;padding:10px;background:rgba(5,35,28,.97);border:1px solid rgba(232,202,114,.65);border-radius:12px}
+.bid-buttons{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:6px}
+.bid-buttons button{min-width:0;padding:7px 2px;font-size:11px}
+.pass-button{width:100%;background:#a83333;color:white;padding:10px 8px}
+.pass-button:hover{background:#c54444}
+.round-score{margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.12);font-size:12px}
+.round-score-grid{display:grid;grid-template-columns:1fr auto auto auto;gap:4px 8px;align-items:center}
+.pause-overlay{position:absolute;inset:0;z-index:20;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center}
+.pause-box{max-width:380px;padding:25px;text-align:center;background:#0b4435;border:2px solid #d8b35b;border-radius:18px}
 </style>
 </head>
 <body>
 
+<div class="top">
+    <div>
+        <div class="brand">🃏 Tysiąc – Gra Parami Multi</div>
+        <div class="sub">Wersja v7 • Para 1: G1 + G3 • Para 2: G2 + G4</div>
+    </div>
+    <div>
+        <button onclick="socket.emit('togglePause')">⏸ Pauza</button>
+        <button onclick="socket.emit('newGame')">🔄 Nowa gra</button>
+    </div>
+</div>
+
 <div class="layout">
     <main class="table">
-        <div id="p0" class="player player-0">Gracz 1</div>
-        <div id="p1" class="player player-1">Gracz 2</div>
-        <div id="p2" class="player player-2">Gracz 3</div>
-        <div id="p3" class="player player-3">Gracz 4</div>
+        <div id="player0" class="player player-0"></div>
+        <div id="player1" class="player player-1"></div>
+        <div id="player2" class="player player-2"></div>
+        <div id="player3" class="player player-3"></div>
 
         <div class="center">
-            <div id="status"></div>
-            <div id="musik" style="margin:10px 0;display:flex;justify-content:center;gap:5px"></div>
-            <div id="trick" style="display:flex;justify-content:center;gap:8px;min-height:100px"></div>
+            <div id="status" class="status"></div>
+            <div id="musik" class="musik"></div>
+            <div id="trick" class="trick"></div>
             <div id="controls"></div>
         </div>
 
         <div id="hand" class="hand"></div>
+
+        <div id="pauseOverlay" class="pause-overlay" style="display:none">
+            <div class="pause-box">
+                <h2>⏸️ Gra zapauzowana</h2>
+                <button onclick="socket.emit('togglePause')">▶ Wznów grę</button>
+            </div>
+        </div>
     </main>
 
     <aside class="side">
         <div class="box">
-            <h3>📊 Wyniki</h3>
-            <div>🔵 Para 1 (G1,G3): <b id="s0">0</b></div>
-            <div>🔴 Para 2 (G2,G4): <b id="s1">0</b></div>
+            <h3 style="margin-top:0">📊 Wynik</h3>
+            <div class="scoreline"><b>🔵 Para 1</b><b id="score0">0</b></div>
+            <div class="scoreline"><b>🔴 Para 2</b><b id="score1">0</b></div>
+            <div class="round-score">
+                <b>🎯 Bieżące rozdanie</b>
+                <div class="round-score-grid" style="margin-top:6px">
+                    <span></span><span>Lewy</span><span>Meld.</span><span>Razem</span>
+                    <b>🔵 Para 1</b><b id="roundCard0">0</b><b id="roundMeld0">0</b><b id="roundTotal0">0</b>
+                    <b>🔴 Para 2</b><b id="roundCard1">0</b><b id="roundMeld1">0</b><b id="roundTotal1">0</b>
+                </div>
+                <div id="roundSummary" style="margin-top:7px;opacity:.8"></div>
+            </div>
         </div>
+
         <div class="box">
-            📜 <b>Logi</b>
-            <div id="log" style="height:200px;overflow:auto;font-size:12px;margin-top:6px"></div>
+            <b>📋 Rozgrywka</b>
+            <div id="gameInfo" style="margin-top:6px;font-size:12px"></div>
+        </div>
+
+        <div class="box">
+            <h3 style="margin:0 0 7px">📜 Akcje</h3>
+            <div id="log" class="log"></div>
+        </div>
+
+        <div class="box">
+            <h3 style="margin:0 0 7px">💬 Czat</h3>
+            <div id="chat" class="chat"></div>
+            <div class="chatbar">
+                <input id="chatInput" placeholder="Napisz wiadomość…">
+                <button onclick="sendChat()">➤</button>
+            </div>
         </div>
     </aside>
 </div>
@@ -66,108 +133,197 @@ button:disabled{opacity:.4;cursor:default}
 const socket = io();
 let mySeat = null;
 let selectedCards = [];
-let exchangeTargets = {};
+let exchangeRecipients = {};
 let localState = {};
 
-const name = prompt("Podaj swój nick:") || "Gracz";
-socket.emit('joinGame', name);
+const playerName = prompt("Podaj swój nick:") || "Gracz";
+socket.emit('joinGame', playerName);
 
-socket.on('assignedSeat', (seat) => {
-    mySeat = seat;
-});
-
+socket.on('assignedSeat', (seat) => { mySeat = seat; });
+socket.on('fullGame', () => { alert("Stół jest pełny!"); });
 socket.on('stateUpdate', (state) => {
     localState = state;
     render(state);
 });
 
-function render(state) {
-    document.getElementById('s0').textContent = state.scores[0];
-    document.getElementById('s1').textContent = state.scores[1];
+function team(p) { return p % 2; }
 
-    for(let i=0; i<4; i++) {
+function getCrossMeldCandidate(state) {
+    if (state.phase !== "play" || state.leader !== mySeat || state.trick.length === 0) return null;
+    const previous = state.trick[state.trick.length - 1];
+    if (!previous || previous.player === mySeat || previous.card.rank !== "Q" || state.meldedSuits.includes(previous.card.suit)) return null;
+    const hand = state.players[mySeat]?.hand || [];
+    return hand.find(c => c.rank === "K" && c.suit === previous.card.suit) || null;
+}
+
+function render(state) {
+    document.getElementById('pauseOverlay').style.display = state.paused ? 'flex' : 'none';
+
+    // Gracze przy stole
+    for (let i = 0; i < 4; i++) {
+        const el = document.getElementById('player' + i);
         const p = state.players[i];
-        const el = document.getElementById('p' + i);
-        if(p) {
-            el.innerHTML = `<b>${p.name}</b><br><small>${p.hand.length} kart</small>`;
-            el.className = `player player-${i} ${state.leader === i || state.bidder === i ? 'active' : ''}`;
+        if (p) {
+            const isActive = (state.phase === "bid" && state.bidder === i) || (state.phase === "play" && state.leader === i);
+            const isMe = (mySeat === i);
+            el.className = `player player-${i} ${isActive ? 'active' : ''}`;
+            el.innerHTML = `
+                <b>${p.name} ${isMe ? '🎮 (Ty)' : ''}</b><br>
+                <small>${team(i) === 0 ? '🔵 Para 1' : '🔴 Para 2'} • ${p.hand.length} kart ${state.passed.includes(i) ? '• 🔴 PAS' : ''}</small>
+                <div>${Array.from({length: p.hand.length}, () => '<span class="card-back">🂠</span>').join('')}</div>
+            `;
+        } else {
+            el.innerHTML = `<i>Oczekiwanie…</i>`;
         }
     }
 
-    // Render Hand
+    // Ręka aktualnego gracza
     const handEl = document.getElementById('hand');
     handEl.innerHTML = '';
     const myHand = state.players[mySeat]?.hand || [];
-    
+    const crossCandidate = getCrossMeldCandidate(state);
+
     myHand.forEach(card => {
         const cardDiv = document.createElement('div');
-        cardDiv.className = `card ${card.red ? 'red' : ''} ${selectedCards.includes(card.id) ? 'selected' : ''}`;
-        cardDiv.innerHTML = `<span>${card.rank}</span><span>${card.symbol}</span>`;
-        
+        const isCross = crossCandidate && crossCandidate.id === card.id;
+        cardDiv.className = `card ${card.red ? 'red' : ''} ${selectedCards.includes(card.id) ? 'selected' : ''} ${isCross ? 'cross-meld-ready' : ''}`;
+        cardDiv.innerHTML = `<b>${card.rank}</b><span style="font-size:27px">${card.symbol}</span>`;
+
         cardDiv.onclick = () => {
-            if(state.phase === 'exchange' && state.highestBidder === mySeat) {
+            if (state.phase === 'exchange' && state.highestBidder === mySeat) {
                 toggleSelectCard(card.id);
-            } else if(state.phase === 'play' && state.leader === mySeat) {
+            } else if (state.phase === 'play' && state.leader === mySeat) {
+                if (isCross) {
+                    if (confirm(`Przemeldować Królem ${card.symbol} Damę ${card.symbol}?`)) {
+                        socket.emit('playCard', { seat: mySeat, cardId: card.id, crossMeld: true });
+                        return;
+                    }
+                }
                 socket.emit('playCard', { seat: mySeat, cardId: card.id, crossMeld: false });
             }
         };
         handEl.appendChild(cardDiv);
     });
 
-    // Controls
+    // Kontrolki
     const ctrl = document.getElementById('controls');
     ctrl.innerHTML = '';
+    ctrl.className = state.phase === "bid" ? "bid-dock" : (state.phase === "exchange" && state.highestBidder === mySeat ? "exchange-dock" : "");
 
-    if(state.phase === 'bid' && state.bidder === mySeat) {
+    if (state.phase === 'bid' && state.bidder === mySeat && !state.passed.includes(mySeat)) {
         const passBtn = document.createElement('button');
-        passBtn.className = 'pass-btn';
-        passBtn.textContent = 'PAS';
+        passBtn.className = 'pass-button';
+        passBtn.textContent = '🔴 PAS';
         passBtn.onclick = () => socket.emit('bid', { seat: mySeat, amount: 0 });
         ctrl.appendChild(passBtn);
 
         const grid = document.createElement('div');
-        grid.className = 'bid-grid';
-        for(let amt = 110; amt <= 240; amt += 10) {
-            if(amt > state.highestBid) {
-                const b = document.createElement('button');
-                b.textContent = amt;
-                b.onclick = () => socket.emit('bid', { seat: mySeat, amount: amt });
-                grid.appendChild(b);
-            }
+        grid.className = 'bid-buttons';
+        for (let amt = 110; amt <= 240; amt += 10) {
+            const b = document.createElement('button');
+            b.textContent = amt;
+            b.disabled = amt <= state.highestBid;
+            b.onclick = () => socket.emit('bid', { seat: mySeat, amount: amt });
+            grid.appendChild(b);
         }
         ctrl.appendChild(grid);
     }
 
-    if(state.phase === 'exchange' && state.highestBidder === mySeat) {
-        if(selectedCards.length === 3) {
-            const confirmBtn = document.createElement('button');
-            confirmBtn.textContent = 'Zatwierdź oddanie 3 kart';
-            confirmBtn.onclick = () => {
-                const targets = [ (mySeat+1)%4, (mySeat+2)%4, (mySeat+3)%4 ];
-                socket.emit('exchangeCards', { seat: mySeat, selectedIds: selectedCards, recipients: targets });
-                selectedCards = [];
-            };
-            ctrl.appendChild(confirmBtn);
+    if (state.phase === 'exchange' && state.highestBidder === mySeat) {
+        const hint = document.createElement('div');
+        hint.style.cssText = "margin-bottom:8px;font-size:12px;";
+        hint.textContent = "Wybierz 3 karty z ręki/musika i przypisz odbiorców:";
+        ctrl.appendChild(hint);
+
+        selectedCards.forEach((id, idx) => {
+            const row = document.createElement('div');
+            row.style.cssText = "display:flex;gap:6px;margin-bottom:4px;align-items:center;";
+            row.innerHTML = `<span>Karta ${idx+1}:</span>`;
+            
+            const sel = document.createElement('select');
+            sel.innerHTML = `<option value="">Wybierz odbiorcę…</option>`;
+            [0,1,2,3].filter(p => p !== mySeat).forEach(p => {
+                sel.innerHTML += `<option value="${p}" ${exchangeRecipients[id] === p ? 'selected' : ''}>${state.players[p]?.name}</option>`;
+            });
+            sel.onchange = () => { exchangeRecipients[id] = sel.value === "" ? null : Number(sel.value); render(localState); };
+            row.appendChild(sel);
+            ctrl.appendChild(row);
+        });
+
+        const confirmBtn = document.createElement('button');
+        const recipients = selectedCards.map(id => exchangeRecipients[id]);
+        const ready = selectedCards.length === 3 && recipients.every(r => r !== null && r !== undefined) && new Set(recipients).size === 3;
+        confirmBtn.disabled = !ready;
+        confirmBtn.textContent = `📤 Przekaż 3 karty (${selectedCards.length}/3)`;
+        confirmBtn.onclick = () => {
+            socket.emit('exchangeCards', { seat: mySeat, selectedIds: selectedCards, recipients });
+            selectedCards = [];
+            exchangeRecipients = {};
+        };
+        ctrl.appendChild(confirmBtn);
+    }
+
+    if (state.phase === 'play' && state.leader === mySeat) {
+        if (state.trick.length === 1 && (state.trick[0].card.rank === "K" || state.trick[0].card.rank === "Q") && !state.meldedSuits.includes(state.trick[0].card.suit)) {
+            const pairRank = state.trick[0].card.rank === "K" ? "Q" : "K";
+            if (state.players[mySeat].hand.some(c => c.suit === state.trick[0].card.suit && c.rank === pairRank)) {
+                const meldBtn = document.createElement('button');
+                meldBtn.textContent = '💍 Zgłoś Meldunek';
+                meldBtn.onclick = () => socket.emit('makeMeld', { seat: mySeat });
+                ctrl.appendChild(meldBtn);
+            }
         }
     }
 
-    // Meldunek button
-    if(state.phase === 'play' && state.leader === mySeat && state.trick.length === 1) {
-        const meldBtn = document.createElement('button');
-        meldBtn.textContent = '💍 Zgłoś Meldunek';
-        meldBtn.onclick = () => socket.emit('makeMeld', { seat: mySeat });
-        ctrl.appendChild(meldBtn);
+    if (state.phase === 'next') {
+        const nextBtn = document.createElement('button');
+        nextBtn.textContent = '▶ Następne rozdanie';
+        nextBtn.onclick = () => socket.emit('nextRound');
+        ctrl.appendChild(nextBtn);
     }
 
-    // Logi
+    // Środek - Musik i Lewa
+    document.getElementById('musik').innerHTML = state.phase === 'exchange' ? state.musik.map(c => `
+        <div class="card ${c.red ? 'red' : ''} ${selectedCards.includes(c.id) ? 'selected' : ''}" onclick="toggleSelectCard('${c.id}')">
+            <b>${c.rank}</b><span style="font-size:27px">${c.symbol}</span>
+        </div>`).join('') : '';
+
+    document.getElementById('trick').innerHTML = state.trick.map(t => `
+        <div class="trick-player">
+            <small>${state.players[t.player]?.name}</small>
+            <div class="card ${t.card.red ? 'red' : ''}"><b>${t.card.rank}</b><span style="font-size:27px">${t.card.symbol}</span></div>
+        </div>`).join('');
+
+    // Wyniki
+    document.getElementById('score0').textContent = state.scores[0];
+    document.getElementById('score1').textContent = state.scores[1];
+    for(let t=0; t<2; t++) {
+        document.getElementById('roundCard' + t).textContent = state.roundCardPoints[t];
+        document.getElementById('roundMeld' + t).textContent = state.melds[t];
+        document.getElementById('roundTotal' + t).textContent = state.roundCardPoints[t] + state.melds[t];
+    }
+
     document.getElementById('log').innerHTML = state.log.map(l => `<div>${l}</div>`).join('');
+    document.getElementById('chat').innerHTML = state.chat.map(c => `<div>${c}</div>`).join('');
 }
 
 function toggleSelectCard(id) {
     const idx = selectedCards.indexOf(id);
-    if(idx >= 0) selectedCards.splice(idx, 1);
-    else if(selectedCards.length < 3) selectedCards.push(id);
+    if (idx >= 0) {
+        selectedCards.splice(idx, 1);
+        delete exchangeRecipients[id];
+    } else if (selectedCards.length < 3) {
+        selectedCards.push(id);
+    }
     render(localState);
+}
+
+function sendChat() {
+    const inp = document.getElementById('chatInput');
+    if (inp.value.trim()) {
+        socket.emit('sendChat', inp.value);
+        inp.value = '';
+    }
 }
 </script>
 </body>
