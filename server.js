@@ -42,7 +42,6 @@ function createDeck() {
       deck.push({ rank: r, suit: s, symbol: `${r}${s}` });
     }
   }
-  // Tasowanie
   for (let i = deck.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [deck[i], deck[j]] = [deck[j], deck[i]];
@@ -61,6 +60,38 @@ async function broadcastRoomList() {
     io.emit('roomListUpdate', roomList);
   } catch(err) {
     console.error("Błąd przy pobieraniu listy pokoi:", err);
+  }
+}
+
+async function leaveCurrentRoom(socket) {
+  if (!socket.roomId || !socket.username) return;
+
+  try {
+    let room = await Room.findOne({ roomId: socket.roomId });
+    if (room) {
+      room.players = room.players.filter(p => p.name !== socket.username);
+
+      // Re-indeksacja graczy przy stole
+      room.players.forEach((p, idx) => {
+        p.index = idx;
+      });
+
+      // Jeśli stół jest pusty, zrestartuj jego stan
+      if (room.players.length === 0) {
+        room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
+      }
+
+      room.markModified('players');
+      room.markModified('gameState');
+      await room.save();
+
+      socket.leave(socket.roomId);
+      io.to(socket.roomId).emit('updateState', { room });
+      await broadcastRoomList();
+    }
+    socket.roomId = null;
+  } catch (err) {
+    console.error("Błąd podczas opuszczania pokoju:", err);
   }
 }
 
@@ -88,6 +119,13 @@ io.on('connection', (socket) => {
 
     socket.on('joinGame', async ({ roomId, password, username }) => {
         try {
+            // Jeśli gracz jest już w innym pokoju, usuń go stamtąd
+            if (socket.roomId && socket.roomId !== roomId) {
+                await leaveCurrentRoom(socket);
+            }
+
+            socket.username = username;
+
             let room = await Room.findOne({ roomId });
 
             if (!room) {
@@ -133,6 +171,16 @@ io.on('connection', (socket) => {
         } catch (err) {
             socket.emit('errorMsg', 'Błąd podczas dołączania.');
         }
+    });
+
+    socket.on('leaveRoom', async () => {
+        await leaveCurrentRoom(socket);
+        socket.emit('leftRoomSuccess');
+    });
+
+    socket.on('disconnect', async () => {
+        // Jeśli rozłączyło gracza (zamknięcie karty/brak internetu)
+        await leaveCurrentRoom(socket);
     });
 
     // Start Rozgrywki przez Gospodarza
