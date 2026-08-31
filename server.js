@@ -92,7 +92,6 @@ async function leaveCurrentRoom(socket) {
   }
 }
 
-// Czyszczenie nieaktywnych stołów po 1 minucie
 setInterval(async () => {
   try {
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
@@ -113,7 +112,7 @@ setInterval(async () => {
       await broadcastRoomList();
     }
   } catch (err) {
-    console.error("Błąd podczas czyszczenia starych pokoi:", err);
+    console.error("Błąd czyszczenia:", err);
   }
 }, 15000);
 
@@ -220,7 +219,8 @@ io.on('connection', (socket) => {
                     id: socket.id,
                     name: username,
                     index: room.players.length,
-                    hand: []
+                    hand: [],
+                    score: 0
                 };
                 room.players.push(existingPlayer);
             } else {
@@ -251,29 +251,33 @@ io.on('connection', (socket) => {
         }
     });
 
-    // START ROZGRYWKI - ROZDANIE KART I START LICYTACJI
+    // START GRY PRZEZ GOSPODARZA - ROZDANIE DLA WSZYSTKICH I PRZEŁĄCZENIE WIDOKU
     socket.on('startGame', async ({ roomId }) => {
         try {
             let room = await Room.findOne({ roomId });
             if (!room || room.players.length < 4) {
-                socket.emit('errorMsg', 'Wymaganych jest 4 graczy!');
+                socket.emit('errorMsg', 'Wymaganych jest co najmniej 4 graczy!');
                 return;
             }
 
             const deck = createDeck();
             
+            // Rozdanie kart dla 4 graczy
             room.players[0].hand = deck.slice(0, 5);
             room.players[1].hand = deck.slice(5, 10);
             room.players[2].hand = deck.slice(10, 15);
             room.players[3].hand = deck.slice(15, 20);
             
             room.gameState = {
-                status: 'BIDDING',
+                status: 'BIDDING', // Natychmiastowe przejście do licytacji dla wszystkich
                 musik: deck.slice(20, 24),
                 currentBid: 100,
                 highestBidderIndex: 0,
                 currentTurnIndex: 0,
-                activeBidders: [0, 1, 2, 3]
+                activeBidders: [0, 1, 2, 3],
+                tableCards: [],
+                trumpSuit: null,
+                declaredMeld: null
             };
 
             room.updatedAt = new Date();
@@ -281,13 +285,14 @@ io.on('connection', (socket) => {
             room.markModified('gameState');
             await room.save();
 
+            // Emitujemy do WSZYSTKICH podłączonych graczy w pokoju
             io.to(roomId).emit('updateState', { room });
         } catch (err) {
             console.error("Błąd startu gry:", err);
         }
     });
 
-    // AKCJA LICYTACJI (PODBICIE / PAS)
+    // LICYTACJA NA ŻYWO
     socket.on('makeBid', async ({ roomId, action, value }) => {
         try {
             let room = await Room.findOne({ roomId });
@@ -296,40 +301,89 @@ io.on('connection', (socket) => {
             const state = room.gameState;
             const playerIndex = room.players.findIndex(p => p.name === socket.username);
 
-            if (playerIndex !== state.currentTurnIndex) {
-                return socket.emit('errorMsg', 'To nie Twoja kolej na licytację!');
-            }
+            if (playerIndex !== state.currentTurnIndex) return;
 
             if (action === 'BID') {
-                if (value <= state.currentBid || value % 10 !== 0) {
-                    return socket.emit('errorMsg', 'Oferta musi być wyższa i podzielna przez 10!');
-                }
+                if (value <= state.currentBid || value % 10 !== 0) return;
                 state.currentBid = value;
                 state.highestBidderIndex = playerIndex;
             } else if (action === 'PASS') {
                 state.activeBidders = state.activeBidders.filter(idx => idx !== playerIndex);
             }
 
-            // Jeśli został tylko 1 licytujący -> Koniec Licytacji
             if (state.activeBidders.length === 1) {
                 const winnerIndex = state.activeBidders[0];
-                state.status = 'BIDDING_FINISHED';
+                state.status = 'PLAYING';
                 state.currentTurnIndex = winnerIndex;
-                
-                // Zwycięzca otrzymuje karty z Musika
                 room.players[winnerIndex].hand.push(...state.musik);
             } else {
-                // Przechodzimy do kolejnej aktywnej osoby
                 let currentIdxInActive = state.activeBidders.indexOf(playerIndex);
                 if (action === 'PASS') {
-                    if (currentIdxInActive >= state.activeBidders.length) {
-                        currentIdxInActive = 0;
-                    }
+                    if (currentIdxInActive >= state.activeBidders.length) currentIdxInActive = 0;
                 } else {
                     currentIdxInActive = (currentIdxInActive + 1) % state.activeBidders.length;
                 }
                 state.currentTurnIndex = state.activeBidders[currentIdxInActive];
             }
+
+            room.updatedAt = new Date();
+            room.markModified('players');
+            room.markModified('gameState');
+            await room.save();
+
+            io.to(roomId).emit('updateState', { room });
+        } catch (err) {
+            console.error(err);
+        }
+    });
+
+    // ZAGRANIE KARTY / MELDUNEK NA ŻYWO
+    socket.on('playCard', async ({ roomId, cardSymbol, meldSuit }) => {
+        try {
+            let room = await Room.findOne({ roomId });
+            if (!room || room.gameState.status !== 'PLAYING') return;
+
+            const state = room.gameState;
+            const playerIndex = room.players.findIndex(p => p.name === socket.username);
+
+            if (playerIndex !== state.currentTurnIndex) {
+                return socket.emit('errorMsg', 'To nie Twoja kolej!');
+            }
+
+            const player = room.players[playerIndex];
+            const cardIdx = player.hand.findIndex(c => c.symbol === cardSymbol);
+
+            if (cardIdx === -1) return;
+
+            const playedCard = player.hand.splice(cardIdx, 1)[0];
+
+            if (meldSuit) {
+                const meldValues = { '♥': 100, '♦': 80, '♣': 60, '♠': 40 };
+                state.trumpSuit = meldSuit;
+                const points = meldValues[meldSuit] || 0;
+                player.score = (player.score || 0) + points;
+                state.declaredMeld = `${player.name} zameldował ${meldSuit} (+${points} pkt)! Atut: ${meldSuit}`;
+            }
+
+            state.tableCards.push({
+                playerIndex: playerIndex,
+                playerName: player.name,
+                card: playedCard
+            });
+
+            if (state.tableCards.length === 4) {
+                setTimeout(async () => {
+                    let r = await Room.findOne({ roomId });
+                    if(r){
+                        r.gameState.tableCards = [];
+                        r.markModified('gameState');
+                        await r.save();
+                        io.to(roomId).emit('updateState', { room: r });
+                    }
+                }, 2000);
+            }
+
+            state.currentTurnIndex = (state.currentTurnIndex + 1) % room.players.length;
 
             room.updatedAt = new Date();
             room.markModified('players');
