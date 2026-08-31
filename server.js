@@ -71,10 +71,7 @@ async function leaveCurrentRoom(socket) {
     let room = await Room.findOne({ roomId: socket.roomId });
     if (room) {
       room.players = room.players.filter(p => p.name !== socket.username);
-
-      room.players.forEach((p, idx) => {
-        p.index = idx;
-      });
+      room.players.forEach((p, idx) => { p.index = idx; });
 
       if (room.players.length === 0) {
         room.gameState = { status: 'LOBBY', round: 1, currentTurn: 0 };
@@ -95,7 +92,7 @@ async function leaveCurrentRoom(socket) {
   }
 }
 
-// Czyszczenie nieaktywnych stołów po 1 minucie (60 sekund)
+// Czyszczenie nieaktywnych stołów po 1 minucie
 setInterval(async () => {
   try {
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
@@ -120,7 +117,6 @@ setInterval(async () => {
   }
 }, 15000);
 
-// Funkcja pomocnicza do sprawdzania czy gracz jest adminem
 function checkIsAdmin(username, pin) {
   return username === 'SLIWAPARSZYWKADOROTA' && pin === '2597';
 }
@@ -132,7 +128,6 @@ io.on('connection', (socket) => {
         try {
             const cleanName = username.trim();
             const cleanPin = pin.trim();
-
             const isAdmin = checkIsAdmin(cleanName, cleanPin);
 
             let user = await User.findOne({ username: cleanName });
@@ -152,19 +147,17 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Weryfikacja Admina przy przycisku resetowania czasu
     socket.on('adminResetTimer', async ({ roomId, pin }) => {
         if (!socket.username || !checkIsAdmin(socket.username, pin || '')) {
             return socket.emit('errorMsg', 'Brak uprawnień administratora!');
         }
-
         try {
             let room = await Room.findOne({ roomId });
             if (room) {
                 room.updatedAt = new Date();
                 await room.save();
                 await broadcastRoomList();
-                socket.emit('errorMsg', `⏱️ Zresetowano timer dla ${roomId}! Stół nie zostanie zamknięty przez 1 minutę.`);
+                socket.emit('errorMsg', `⏱️ Zresetowano timer dla ${roomId}!`);
             }
         } catch (err) {
             console.error(err);
@@ -258,11 +251,12 @@ io.on('connection', (socket) => {
         }
     });
 
+    // START ROZGRYWKI - ROZDANIE KART I START LICYTACJI
     socket.on('startGame', async ({ roomId }) => {
         try {
             let room = await Room.findOne({ roomId });
             if (!room || room.players.length < 4) {
-                socket.emit('errorMsg', 'Wymaganych jest co najmniej 4 graczy do rozpoczęcia!');
+                socket.emit('errorMsg', 'Wymaganych jest 4 graczy!');
                 return;
             }
 
@@ -277,8 +271,9 @@ io.on('connection', (socket) => {
                 status: 'BIDDING',
                 musik: deck.slice(20, 24),
                 currentBid: 100,
-                highestBidder: 0,
-                currentTurn: 0
+                highestBidderIndex: 0,
+                currentTurnIndex: 0,
+                activeBidders: [0, 1, 2, 3]
             };
 
             room.updatedAt = new Date();
@@ -289,6 +284,61 @@ io.on('connection', (socket) => {
             io.to(roomId).emit('updateState', { room });
         } catch (err) {
             console.error("Błąd startu gry:", err);
+        }
+    });
+
+    // AKCJA LICYTACJI (PODBICIE / PAS)
+    socket.on('makeBid', async ({ roomId, action, value }) => {
+        try {
+            let room = await Room.findOne({ roomId });
+            if (!room || room.gameState.status !== 'BIDDING') return;
+
+            const state = room.gameState;
+            const playerIndex = room.players.findIndex(p => p.name === socket.username);
+
+            if (playerIndex !== state.currentTurnIndex) {
+                return socket.emit('errorMsg', 'To nie Twoja kolej na licytację!');
+            }
+
+            if (action === 'BID') {
+                if (value <= state.currentBid || value % 10 !== 0) {
+                    return socket.emit('errorMsg', 'Oferta musi być wyższa i podzielna przez 10!');
+                }
+                state.currentBid = value;
+                state.highestBidderIndex = playerIndex;
+            } else if (action === 'PASS') {
+                state.activeBidders = state.activeBidders.filter(idx => idx !== playerIndex);
+            }
+
+            // Jeśli został tylko 1 licytujący -> Koniec Licytacji
+            if (state.activeBidders.length === 1) {
+                const winnerIndex = state.activeBidders[0];
+                state.status = 'BIDDING_FINISHED';
+                state.currentTurnIndex = winnerIndex;
+                
+                // Zwycięzca otrzymuje karty z Musika
+                room.players[winnerIndex].hand.push(...state.musik);
+            } else {
+                // Przechodzimy do kolejnej aktywnej osoby
+                let currentIdxInActive = state.activeBidders.indexOf(playerIndex);
+                if (action === 'PASS') {
+                    if (currentIdxInActive >= state.activeBidders.length) {
+                        currentIdxInActive = 0;
+                    }
+                } else {
+                    currentIdxInActive = (currentIdxInActive + 1) % state.activeBidders.length;
+                }
+                state.currentTurnIndex = state.activeBidders[currentIdxInActive];
+            }
+
+            room.updatedAt = new Date();
+            room.markModified('players');
+            room.markModified('gameState');
+            await room.save();
+
+            io.to(roomId).emit('updateState', { room });
+        } catch (err) {
+            console.error(err);
         }
     });
 });
