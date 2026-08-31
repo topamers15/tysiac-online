@@ -85,6 +85,29 @@ function updateHosts() {
     }
 }
 
+function hasFourNines(seat) {
+    const hand = gameState.players[seat]?.hand || [];
+    return hand.filter(c => c.rank === "9").length === 4;
+}
+
+function handleFoldFourNines(seat) {
+    if (gameState.phase !== "bid" || gameState.paused) return;
+    if (!hasFourNines(seat)) return;
+
+    const playerTeam = team(seat);
+    const enemyTeam = playerTeam === 0 ? 1 : 0;
+
+    gameState.scores[enemyTeam] += 60;
+
+    const playerName = gameState.players[seat].name;
+    addChat(`SYSTEM: 🎴 ${playerName} zgłosił 4 dziewiątki! Rozdanie przerwane. Przeciwnicy otrzymują +60 pkt.`);
+    addLog(`🎴 ${playerName}: 4 dziewiątki -> Przeciwnicy +60 pkt`);
+
+    gameState.phase = "next";
+    io.emit('stateUpdate', gameState);
+    checkBotTurn();
+}
+
 function startNewRound() {
     const deck = createDeck();
     gameState.players.forEach(p => p.hand = []);
@@ -194,16 +217,21 @@ function evaluateBotHand(seat) {
     const aces = hand.filter(c => c.rank === "A").length;
     evalScore += (aces * 10);
 
-    return evalScore;
+    return Math.min(evalScore, 240);
 }
 
 function botProcessBid(seat) {
     if (gameState.phase !== "bid" || gameState.bidder !== seat) return;
 
+    if (hasFourNines(seat)) {
+        handleFoldFourNines(seat);
+        return;
+    }
+
     const maxBid = evaluateBotHand(seat);
     const nextBid = gameState.highestBid + 10;
 
-    if (nextBid <= maxBid && nextBid <= 180) {
+    if (nextBid <= maxBid && nextBid <= 240) {
         handleBid(seat, nextBid);
     } else {
         handleBid(seat, 0);
@@ -214,10 +242,9 @@ function botProcessExchange(seat) {
     if (gameState.phase !== "exchange" || gameState.highestBidder !== seat) return;
 
     const bot = gameState.players[seat];
-    const allCards = [...bot.hand, ...gameState.musik];
-    allCards.sort((a, b) => a.value - b.value);
+    bot.hand.sort((a, b) => a.value - b.value);
 
-    const selectedIds = allCards.slice(0, 3).map(c => c.id);
+    const selectedIds = bot.hand.slice(0, 3).map(c => c.id);
     const otherSeats = [0, 1, 2, 3].filter(s => s !== seat);
 
     handleExchange(seat, selectedIds, otherSeats);
@@ -268,7 +295,7 @@ function handleBid(seat, amount) {
         addChat(`${gameState.players[seat].name}: 🔴 PAS`);
         addLog(`🔴 ${gameState.players[seat].name} spasował.`);
     } else {
-        if (amount <= gameState.highestBid) return;
+        if (amount <= gameState.highestBid || amount > 240) return;
         gameState.highestBid = amount;
         gameState.highestBidder = seat;
         addLog(`🔨 ${gameState.players[seat].name} licytuje ${amount}`);
@@ -281,7 +308,6 @@ function handleBid(seat, amount) {
         gameState.declared = gameState.highestBid;
         gameState.bidder = -1;
         
-        // Faza podglądu musiku (10s)
         gameState.phase = "show_musik"; 
         addChat(`SYSTEM: ${gameState.players[winner].name} wygrywa licytację (${gameState.highestBid} pkt). Podgląd musiku przez 10 sekund...`);
         io.emit('stateUpdate', gameState);
@@ -289,7 +315,13 @@ function handleBid(seat, amount) {
         setTimeout(() => {
             if (gameState.phase === "show_musik") {
                 gameState.phase = "exchange";
-                addChat(`SYSTEM: Rozpoczyna się faza wymiany kart.`);
+                
+                const winnerPlayer = gameState.players[winner];
+                winnerPlayer.hand.push(...gameState.musik);
+                gameState.musik = [];
+                winnerPlayer.hand.sort((a, b) => b.value - a.value);
+
+                addChat(`SYSTEM: Musik trafił do ręki ${winnerPlayer.name}. Wybierz 3 karty do oddania.`);
                 io.emit('stateUpdate', gameState);
                 checkBotTurn();
             }
@@ -314,24 +346,15 @@ function handleExchange(seat, selectedIds, recipients) {
 
     selectedIds.forEach((id, index) => {
         const target = recipients[index];
-        let card = null;
-
         let cardIndex = p.hand.findIndex(c => c.id === id);
+        
         if (cardIndex >= 0) {
-            card = p.hand.splice(cardIndex, 1)[0];
-        } else {
-            let mIndex = gameState.musik.findIndex(c => c.id === id);
-            if (mIndex >= 0) card = gameState.musik.splice(mIndex, 1)[0];
-        }
-
-        if (card) {
+            const card = p.hand.splice(cardIndex, 1)[0];
             gameState.players[target].hand.push(card);
             addLog(`📤 ${p.name} przekazuje ${card.rank}${card.symbol} → ${gameState.players[target].name}`);
         }
     });
 
-    p.hand.push(...gameState.musik);
-    gameState.musik = [];
     gameState.players.forEach(pl => pl.hand.sort((a, b) => b.value - a.value));
 
     gameState.phase = "play";
@@ -395,7 +418,6 @@ io.on('connection', (socket) => {
         if (gameState.players.length < 4) {
             const seat = gameState.players.length;
             
-            // Dołączenie do roomu z samymi botami daje status Hosta
             const onlyBots = gameState.players.every(p => p.isBot);
             const isHost = gameState.players.length === 0 || onlyBots;
 
@@ -483,6 +505,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('bid', ({ seat, amount }) => handleBid(seat, amount));
+    socket.on('foldFourNines', ({ seat }) => handleFoldFourNines(seat));
     socket.on('exchangeCards', ({ seat, selectedIds, recipients }) => handleExchange(seat, selectedIds, recipients));
     socket.on('playCard', ({ seat, cardId, crossMeld }) => handlePlayCard(seat, cardId, crossMeld));
 
@@ -578,35 +601,21 @@ function finishRound() {
     ];
 
     const contractMade = rawPoints[biddingTeam] >= gameState.declared;
-    const scoreDelta = [0, 0];
 
     if (contractMade) {
-        scoreDelta[biddingTeam] = gameState.declared;
         gameState.scores[biddingTeam] += gameState.declared;
         addLog(`✅ Para ${biddingTeam + 1} wygrywa kontrakt +${gameState.declared}`);
     } else {
-        scoreDelta[biddingTeam] = -gameState.declared;
         gameState.scores[biddingTeam] -= gameState.declared;
         addLog(`❌ Para ${biddingTeam + 1} nie realizuje kontraktu -${gameState.declared}`);
     }
 
     if (gameState.scores[defendingTeam] < 800) {
-        scoreDelta[defendingTeam] = rawPoints[defendingTeam];
         gameState.scores[defendingTeam] += rawPoints[defendingTeam];
         addLog(`➕ Para ${defendingTeam + 1} +${rawPoints[defendingTeam]} pkt.`);
     } else {
         addLog(`⛔ Para ${defendingTeam + 1} ma 800+ pkt — brak punktów.`);
     }
-
-    gameState.lastRoundSummary = {
-        cardPoints: [...gameState.roundCardPoints],
-        melds: [...gameState.melds],
-        rawPoints: [...rawPoints],
-        biddingTeam,
-        declared: gameState.declared,
-        contractMade,
-        scoreDelta
-    };
 
     addChat(`SYSTEM: 📊 Koniec rozdania — Para 1: ${rawPoints[0]} pkt, Para 2: ${rawPoints[1]} pkt.`);
 
