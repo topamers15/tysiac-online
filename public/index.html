@@ -36,7 +36,8 @@
 
         /* Panele Sterowania */
         .controls { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 8px; font-size: 13px; }
-        button { padding: 8px 14px; border-radius: 6px; border: none; background: #3d6b4f; color: white; font-weight: bold; cursor: pointer; margin: 3px; font-size: 13px; }
+        button, select { padding: 8px 12px; border-radius: 6px; border: none; background: #3d6b4f; color: white; font-weight: bold; cursor: pointer; margin: 3px; font-size: 13px; }
+        select { background: #233325; border: 1px solid #3d5742; }
         button:active { opacity: 0.8; }
         .btn-danger { background: #a83232; }
 
@@ -180,6 +181,11 @@
             });
         }
 
+        function submitBidSelect() {
+            const val = parseInt(document.getElementById('bidSelect').value);
+            socket.emit('bid', { seat: mySeat, amount: val });
+        }
+
         function render(state) {
             const me = state.players.find(p => p.seat === mySeat);
             const amIHost = me ? me.isHost : false;
@@ -227,7 +233,7 @@
 
             // Lewa / Musik na stole
             const trickArea = document.getElementById('trickArea');
-            if (state.phase === "exchange" || state.phase === "show_musik") {
+            if (state.phase === "show_musik") {
                 trickArea.innerHTML = state.musik.map(c => `
                     <div class="card ${c.red ? 'red' : ''}">
                         <div>${c.rank}</div>
@@ -272,15 +278,25 @@
             }
 
             if (state.phase === "bid" && state.bidder === mySeat) {
+                let options = '';
+                for (let val = state.highestBid + 10; val <= 240; val += 10) {
+                    options += `<option value="${val}">${val}</option>`;
+                }
+
+                const myHand = me ? me.hand : [];
+                const hasNines = myHand.filter(c => c.rank === "9").length === 4;
+
                 actionPanel.innerHTML = `
                     <div>Licytujesz! Oferta: <b>${state.highestBid}</b></div>
-                    <button onclick="socket.emit('bid', {seat: ${mySeat}, amount: ${state.highestBid + 10}})">+10 (${state.highestBid + 10})</button>
+                    <select id="bidSelect">${options}</select>
+                    <button onclick="submitBidSelect()">Podbij</button>
                     <button class="btn-danger" onclick="socket.emit('bid', {seat: ${mySeat}, amount: 0})">PAS</button>
+                    ${hasNines ? `<button style="background: #e65100; margin-top: 5px; width: 100%;" onclick="socket.emit('foldFourNines', {seat: ${mySeat}})">🎴 Zgłoś 4 dziewiątki (Złóż się)</button>` : ''}
                 `;
             } else if (state.phase === "exchange" && state.highestBidder === mySeat) {
                 const otherSeats = [0,1,2,3].filter(s => s !== mySeat);
                 actionPanel.innerHTML = `
-                    <div>Zaznacz 3 karty i oddaj:</div>
+                    <div>Karty z musiku są w Twojej ręce. Zaznacz 3 do oddania:</div>
                     <button onclick="confirmExchange([${otherSeats.join(',')}])">Oddaj karty (${selectedCards.length}/3)</button>
                 `;
             } else if (state.phase === "play" && state.leader === mySeat) {
@@ -299,7 +315,7 @@
 
         function confirmExchange(recipients) {
             if (selectedCards.length !== 3) {
-                alert('Zaznacz dokładnie 3 karty!');
+                alert('Zaznacz dokładnie 3 karty do oddania!');
                 return;
             }
             socket.emit('exchangeCards', { seat: mySeat, selectedIds: selectedCards, recipients });
@@ -308,7 +324,7 @@
 
         function playSelectedCard(crossMeld) {
             if (selectedCards.length !== 1) {
-                alert('Zaznacz 1 kartę!');
+                alert('Zaznacz 1 kartę do zagrania!');
                 return;
             }
             socket.emit('playCard', { seat: mySeat, cardId: selectedCards[0], crossMeld });
