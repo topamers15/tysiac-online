@@ -2,233 +2,211 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Tysiąc – Gra Parami Real-time</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tysiąc Multiplayer – Pokój Gry</title>
 <script src="/socket.io/socket.io.js"></script>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#083d30;color:#f7f0dc;font-family:Arial,Helvetica,sans-serif;}
-button,select,input{font:inherit}
-button{border:0;border-radius:9px;padding:9px 12px;background:#d8b45b;color:#21190d;font-weight:bold;cursor:pointer;}
-button:hover{filter:brightness(1.08)}
-button:disabled{opacity:.4;cursor:default}
-.top{max-width:1450px;margin:auto;padding:12px;display:flex;justify-space:between;align-items:center;}
-.brand{font-size:23px;font-weight:900;}
-.sub{font-size:11px;opacity:.7;margin-top:3px;}
-.layout{max-width:1450px;margin:auto;padding:0 12px 12px;display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;}
-.table{position:relative;height:780px;overflow:hidden;border:2px solid #b9954c;border-radius:24px;background:radial-gradient(ellipse at center, #12664c 0%, #0b4938 52%, #062b23 100%);}
-.player{position:absolute;width:180px;padding:8px;text-align:center;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);border-radius:12px;}
-.player.active{outline:3px solid #e8ca72;}
-.player-1{left:50%;bottom:10px;transform:translateX(-50%);}
-.player-3{left:50%;top:10px;transform:translateX(-50%);}
-.player-2{left:10px;top:50%;transform:translateY(-50%);}
-.player-4{right:10px;top:50%;transform:translateY(-50%);}
-.center{position:absolute;left:50%;top:50%;width:430px;transform:translate(-50%,-50%);text-align:center;}
-.status{padding:11px;background:rgba(0,0,0,.4);border-radius:12px;}
-.musik{min-height:105px;display:flex;justify-content:center;align-items:center;gap:5px;}
-.trick{min-height:160px;display:flex;justify-content:center;align-items:center;gap:9px;}
-.trick-player{display:flex;flex-direction:column;align-items:center;}
-.card{width:68px;height:94px;background:#fff9eb;color:#15120e;border:2px solid #d5c8aa;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:900;box-shadow:0 4px 10px rgba(0,0,0,.35);}
-.card.red{color:#a51e25;}
-.card-back{width:18px;height:27px;margin:2px;display:inline-flex;align-items:center;justify-content:center;background:#244f7e;color:white;border:2px solid #d7c69c;border-radius:4px;}
-.hand{position:absolute;left:50%;bottom:105px;transform:translateX(-50%);display:flex;gap:6px;}
-.hand .card{width:74px;height:102px;cursor:pointer;transition:transform .12s;}
-.hand .card:hover{transform:translateY(-7px);}
-.hand .selected{outline:3px solid #e8ca72;transform:translateY(-9px);}
-.side{background:#07352b;border:1px solid rgba(255,255,255,.1);border-radius:15px;padding:10px;display:flex;flex-direction:column;gap:9px;}
-.box{background:rgba(0,0,0,.2);border-radius:12px;padding:10px;}
-.scoreline{display:flex;justify-content:space-between;margin:5px 0;}
-.log{max-height:130px;overflow:auto;font-size:12px;}
-.chat{height:170px;overflow:auto;}
-.chat-message{margin:5px 0;}
-.chatbar{display:flex;gap:5px;}
-.chatbar input{flex:1;min-width:0;padding:8px;border:0;border-radius:8px;}
-#controls.bid-dock{position:absolute;left:50%;top:52px;width:430px;transform:translateX(-50%);z-index:8;padding:8px;background:rgba(5,35,28,.94);border:1px solid rgba(232,202,114,.55);border-radius:12px;}
-#controls.exchange-dock{position:absolute;left:50%;bottom:calc(100% + 12px);width:430px;transform:translateX(-50%);z-index:9;padding:10px;background:rgba(5,35,28,.97);border:1px solid rgba(232,202,114,.65);border-radius:12px;}
-.bid-buttons{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:6px;}
-.bid-buttons button{min-width:0;padding:7px 2px;font-size:11px;}
-.pass-button{width:100%;background:#a83333;color:white;padding:10px 8px;}
-.musik .card.exchange-selectable{cursor:pointer;}
-.musik .card.selected{outline:3px solid #e8ca72;}
+body{margin:0;background:#083d30;color:#f7f0dc;font-family:sans-serif;}
+.screen{display:none;padding:20px;}
+.screen.active{display:block;}
+
+/* FORMULARZE I LOBBY */
+.login-box{max-width:400px;margin:40px auto;background:#07352b;padding:20px;border-radius:12px;border:1px solid #b9954c;}
+.login-box h2{margin-top:0;}
+input, button{width:100%;padding:10px;margin:8px 0;border-radius:6px;border:0;font-size:15px;}
+input{background:#04211a;color:#fff;border:1px solid #1a5e4d;}
+button{background:#d8b45b;color:#111;font-weight:bold;cursor:pointer;}
+button:hover{filter:brightness(1.1);}
+.rooms-list{margin:15px 0;}
+.room-item{background:rgba(0,0,0,0.3);padding:10px;margin:5px 0;border-radius:6px;display:flex;justify-space:between;align-items:center;}
+.room-item button{width:auto;padding:5px 15px;margin:0;}
+
+/* WIDOK GRY */
+.layout{display:grid;grid-template-columns:1fr 300px;gap:10px;height:calc(100vh - 40px);}
+.table{position:relative;background:#12664c;border:2px solid #b9954c;border-radius:15px;overflow:hidden;}
+.player{position:absolute;padding:8px 15px;background:rgba(0,0,0,0.6);border-radius:8px;text-align:center;}
+.player.active{border:2px solid #e8ca72;}
+.p-0{bottom:15px;left:50%;transform:translateX(-50%);}
+.p-1{left:15px;top:50%;transform:translateY(-50%);}
+.p-2{top:15px;left:50%;transform:translateX(-50%);}
+.p-3{right:15px;top:50%;transform:translateY(-50%);}
+.hand{position:absolute;bottom:75px;left:50%;transform:translateX(-50%);display:flex;gap:6px;}
+.card{width:60px;height:90px;background:#fff;color:#000;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:bold;cursor:pointer;box-shadow:0 3px 8px rgba(0,0,0,0.4);font-size:18px;}
+.card.red{color:#c00;}
+.trick{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);display:flex;gap:10px;}
+.side{background:#07352b;padding:12px;display:flex;flex-direction:column;gap:10px;border-radius:12px;}
+.box{background:rgba(0,0,0,0.2);padding:10px;border-radius:8px;font-size:14px;}
+#controls{position:absolute;top:62%;left:50%;transform:translateX(-50%);display:flex;gap:8px;}
+#hostPanel{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;background:rgba(0,0,0,0.8);padding:20px;border-radius:12px;}
 </style>
 </head>
 <body>
 
-<div class="top">
-    <div>
-        <div class="brand">🃏 Tysiąc – Gra Parami Real-time</div>
-        <div class="sub" id="myRoleInfo">Łączenie z serwerem...</div>
+<!-- WIDOK 1: LOBBY I LOGOWANIE -->
+<div id="lobbyScreen" class="screen active">
+    <div class="login-box">
+        <h2>🃏 Dołącz do gry</h2>
+        <label>Twój Nick:</label>
+        <input type="text" id="playerNick" placeholder="np. Janusz">
+        
+        <label>PIN (4 cyfry):</label>
+        <input type="password" id="playerPin" maxlength="4" placeholder="1234">
+
+        <h3>Wybierz stół:</h3>
+        <div id="roomsContainer" class="rooms-list"></div>
+
+        <hr style="border-color:#1a5e4d;margin:15px 0;">
+        <h3>Stwórz własny stół:</h3>
+        <input type="text" id="newRoomName" placeholder="Nazwa Twojego stołu">
+        <button onclick="createRoom()">➕ Stwórz Stół</button>
     </div>
 </div>
 
-<div class="layout">
-<main class="table">
-    <div id="player1" class="player player-1"></div>
-    <div id="player2" class="player player-2"></div>
-    <div id="player3" class="player player-3"></div>
-    <div id="player4" class="player player-4"></div>
+<!-- WIDOK 2: GŁÓWNA GRA -->
+<div id="gameScreen" class="screen">
+    <div class="layout">
+        <div class="table">
+            <div id="p0" class="player p-0">Gracz 1</div>
+            <div id="p1" class="player p-1">Gracz 2</div>
+            <div id="p2" class="player p-2">Gracz 3</div>
+            <div id="p3" class="player p-3">Gracz 4</div>
 
-    <div class="center">
-        <div id="status" class="status"></div>
-        <div id="musik" class="musik"></div>
-        <div id="trick" class="trick"></div>
-        <div id="controls"></div>
-    </div>
+            <div id="hostPanel" style="display:none;">
+                <h3>Oczekiwanie na graczy... (<span id="playerCount">0</span>/4)</h3>
+                <button id="startBtn" onclick="startGame()">🚀 Rozpocznij grę</button>
+            </div>
 
-    <div id="hand" class="hand"></div>
-</main>
+            <div id="trick" class="trick"></div>
+            <div id="controls"></div>
+            <div id="hand" class="hand"></div>
+        </div>
 
-<aside class="side">
-    <div class="box">
-        <h3 style="margin-top:0">📊 Wynik</h3>
-        <div class="scoreline"><b>🔵 Para 1</b><b id="score0">0</b></div>
-        <div class="scoreline"><b>🔴 Para 2</b><b id="score1">0</b></div>
-    </div>
-    <div class="box">
-        <b>📋 Info o grze</b>
-        <div id="gameInfo" style="margin-top:6px;font-size:12px"></div>
-    </div>
-    <div class="box">
-        <h3 style="margin:0 0 7px">📜 Akcje</h3>
-        <div id="log" class="log"></div>
-    </div>
-    <div class="box">
-        <h3 style="margin:0 0 7px">💬 Czat</h3>
-        <div id="chat" class="chat"></div>
-        <div class="chatbar">
-            <input id="chatInput" placeholder="Napisz wiadomość…">
-            <button onclick="sendChat()">➤</button>
+        <div class="side">
+            <div class="box">
+                <h4 style="margin:0 0 8px 0;">Stół: <span id="tableName">-</span></h4>
+                <div>Para 1: <b id="s0">0</b> pkt</div>
+                <div>Para 2: <b id="s1">0</b> pkt</div>
+            </div>
+            <div class="box" style="flex:1;overflow:auto;" id="log"></div>
         </div>
     </div>
-</aside>
 </div>
 
 <script>
 const socket = io();
-const PLAYERS = ["Gracz 1", "Gracz 2", "Gracz 3", "Gracz 4"];
-let state = null;
-let selectedExchange = [];
-let exchangeRecipients = {};
+let myIdx = -1;
+let currentRoomId = null;
 
-socket.on('assignedPlayer', (idx) => {
-    document.getElementById('myRoleInfo').textContent = idx !== -1 
-        ? `Grasz jako: ${PLAYERS[idx]} (Para ${(idx % 2) + 1})` 
-        : 'Obserwator';
+socket.on('errorMsg', msg => alert(msg));
+
+socket.on('roomsList', rooms => {
+    const container = document.getElementById('roomsContainer');
+    container.innerHTML = rooms.map(r => `
+        <div class="room-item">
+            <div>
+                <b>${r.name}</b><br>
+                <small>Graczy: ${r.count}/4 ${r.started ? '(W trakcie)' : ''}</small>
+            </div>
+            <button onclick="joinRoom('${r.id}')" ${r.count >= 4 || r.started ? 'disabled' : ''}>Dołącz</button>
+        </div>
+    `).join('');
 });
 
-socket.on('gameState', (newState) => {
-    state = newState;
-    render();
+function getAuthData() {
+    return {
+        nick: document.getElementById('playerNick').value.trim(),
+        pin: document.getElementById('playerPin').value.trim()
+    };
+}
+
+function joinRoom(roomId) {
+    const auth = getAuthData();
+    socket.emit('loginAndJoin', { ...auth, roomId });
+}
+
+function createRoom() {
+    const auth = getAuthData();
+    const name = document.getElementById('newRoomName').value.trim();
+    socket.emit('createRoom', { ...auth, name });
+}
+
+function startGame() {
+    socket.emit('startGame');
+}
+
+socket.on('joinSuccess', ({ roomId }) => {
+    currentRoomId = roomId;
+    document.getElementById('lobbyScreen').classList.remove('active');
+    document.getElementById('gameScreen').classList.add('active');
+    document.getElementById('tableName').textContent = roomId;
 });
 
-function cardHTML(card) {
-    return `<div class="card ${card.red ? "red" : ""}"><b>${card.rank}</b><span style="font-size:27px">${card.symbol}</span></div>`;
-}
+socket.on('gameState', state => {
+    myIdx = state.myIndex;
 
-function selectCardExchange(id) {
-    if (state.phase !== "exchange" || state.highestBidder !== state.myIndex) return;
-    const idx = selectedExchange.indexOf(id);
-    if (idx >= 0) {
-        selectedExchange.splice(idx, 1);
-        delete exchangeRecipients[id];
-    } else if (selectedExchange.length < 3) {
-        selectedExchange.push(id);
-        exchangeRecipients[id] = null;
-    }
-    render();
-}
-
-function sendExchange() {
-    const transfers = selectedExchange.map(id => ({ cardId: id, targetPlayer: exchangeRecipients[id] }));
-    socket.emit('exchange', { transfers });
-    selectedExchange = [];
-    exchangeRecipients = {};
-}
-
-function sendChat() {
-    const input = document.getElementById("chatInput");
-    if (input.value.trim()) {
-        socket.emit('sendChat', input.value.trim());
-        input.value = "";
-    }
-}
-
-function render() {
-    if (!state) return;
-
+    // Aktualizacja Graczy na stole
     for (let i = 0; i < 4; i++) {
-        const el = document.getElementById("player" + (i + 1));
-        const active = (state.phase === "bid" && state.bidder === i) || (state.phase === "play" && state.leader === i);
-        el.className = `player player-${i + 1}${active ? " active" : ""}`;
-        el.innerHTML = `
-            <b>${PLAYERS[i]} ${i === state.myIndex ? "🎮" : ""}</b><br>
-            <small>Para ${(i % 2) + 1} ${state.passed.includes(i) ? "• PAS" : ""}</small>
+        const pEl = document.getElementById(`p${i}`);
+        const pData = state.playersList[i];
+        
+        if (pData) {
+            pEl.innerHTML = `<b>${pData.nick}</b> ${pData.isHost ? '👑' : ''}<br><small>Para ${(i%2)+1}</small>`;
+        } else {
+            pEl.innerHTML = `<i>Wolne miejsce</i>`;
+        }
+
+        pEl.className = `player p-${i}` + ((state.phase === 'bid' && state.bidder === i) || (state.phase === 'play' && state.leader === i) ? ' active' : '');
+    }
+
+    // Panel Startu Gospodarza
+    const hostPanel = document.getElementById('hostPanel');
+    const connectedCount = state.playersList.filter(Boolean).length;
+    document.getElementById('playerCount').textContent = connectedCount;
+
+    if (!state.gameStarted) {
+        hostPanel.style.display = 'block';
+        const isMeHost = state.playersList[myIdx] && state.playersList[myIdx].isHost;
+        document.getElementById('startBtn').style.display = isMeHost ? 'block' : 'none';
+    } else {
+        hostPanel.style.display = 'none';
+    }
+
+    // Punkty
+    document.getElementById('s0').textContent = state.scores[0];
+    document.getElementById('s1').textContent = state.scores[1];
+
+    // Ręka gracza
+    const hand = document.getElementById('hand');
+    hand.innerHTML = (state.myHand || []).map(c => `
+        <div class="card ${c.red ? 'red':''}" onclick="playCard('${c.id}')">
+            <span>${c.rank}</span><span>${c.symbol}</span>
+        </div>
+    `).join('');
+
+    // Lewa na stole
+    document.getElementById('trick').innerHTML = (state.trick || []).map(t => `
+        <div class="card ${t.card.red ? 'red':''}">
+            <span>${t.card.rank}</span><span>${t.card.symbol}</span>
+        </div>
+    `).join('');
+
+    // Akcje licytacji
+    const ctr = document.getElementById('controls');
+    ctr.innerHTML = '';
+    if (state.phase === 'bid' && state.bidder === myIdx) {
+        ctr.innerHTML = `
+            <button onclick="bid(0)">PAS</button>
+            <button onclick="bid(${state.highestBid + 10})">${state.highestBid + 10}</button>
         `;
     }
 
-    const handEl = document.getElementById("hand");
-    handEl.innerHTML = (state.myHand || []).map(card => `
-        <div class="card ${card.red ? "red" : ""} ${selectedExchange.includes(card.id) ? "selected" : ""}" data-id="${card.id}">
-            <b>${card.rank}</b><span style="font-size:27px">${card.symbol}</span>
-        </div>
-    `).join("");
+    // Dziennik zdarzeń
+    document.getElementById('log').innerHTML = (state.log || []).map(l => `<div>${l}</div>`).join('');
+});
 
-    handEl.querySelectorAll('.card').forEach(el => {
-        el.onclick = () => {
-            const id = el.dataset.id;
-            if (state.phase === "exchange") selectCardExchange(id);
-            else if (state.phase === "play" && state.leader === state.myIndex) {
-                socket.emit('playCard', { cardId: id, isCrossMeld: false });
-            }
-        };
-    });
-
-    const controls = document.getElementById("controls");
-    controls.innerHTML = "";
-    controls.className = state.phase === "bid" ? "bid-dock" : (state.phase === "exchange" ? "exchange-dock" : "");
-
-    if (state.phase === "bid" && state.bidder === state.myIndex) {
-        const passBtn = document.createElement("button");
-        passBtn.className = "pass-button";
-        passBtn.textContent = "🔴 PAS";
-        passBtn.onclick = () => socket.emit('bid', 0);
-        controls.appendChild(passBtn);
-
-        const wrap = document.createElement("div");
-        wrap.className = "bid-buttons";
-        for (let amt = 110; amt <= 240; amt += 10) {
-            const b = document.createElement("button");
-            b.textContent = amt;
-            b.disabled = amt <= state.highestBid;
-            b.onclick = () => socket.emit('bid', amt);
-            wrap.appendChild(b);
-        }
-        controls.appendChild(wrap);
-    } 
-    else if (state.phase === "exchange" && state.highestBidder === state.myIndex) {
-        const b = document.createElement("button");
-        b.textContent = `Zatwierdź przekazanie (${selectedExchange.length}/3)`;
-        const isReady = selectedExchange.length === 3 && Object.values(exchangeRecipients).every(v => v !== null && v !== undefined);
-        b.disabled = !isReady;
-        b.onclick = sendExchange;
-        controls.appendChild(b);
-    }
-    else if (state.phase === "next") {
-        const b = document.createElement("button");
-        b.textContent = "▶ Następne rozdanie";
-        b.onclick = () => socket.emit('nextRound');
-        controls.appendChild(b);
-    }
-
-    document.getElementById("trick").innerHTML = state.trick.map(p => `
-        <div class="trick-player"><small>${PLAYERS[p.player]}</small>${cardHTML(p.card)}</div>
-    `).join("");
-
-    document.getElementById("score0").textContent = state.scores[0];
-    document.getElementById("score1").textContent = state.scores[1];
-    document.getElementById("log").innerHTML = state.log.map(l => `<div>${l}</div>`).join("");
-    document.getElementById("chat").innerHTML = state.chat.map(c => `<div class="chat-message">${c}</div>`).join("");
-}
+function bid(amt) { socket.emit('bid', amt); }
+function playCard(id) { socket.emit('playCard', { cardId: id }); }
 </script>
 </body>
 </html>
