@@ -147,16 +147,16 @@ function renderActions() {
         actionsContainer.appendChild(ninesBtn);
     }
 
-    // Faza rozgrywki - ruch gracza
+    // Ruch w fazie rozgrywki
     if (gameState.phase === 'play' && gameState.leader === mySeat) {
 
-        // Przycisk Zamelduj K/Q (widoczny tylko przy zaznaczonej Damię/Królu posiadającym parę)
+        // Przycisk Zamelduj K/Q — generowany dynamicznie tylko wtedy, gdy posiadasz parę K+Q w tym samym kolorze
         if (selectedCard && (selectedCard.rank === 'K' || selectedCard.rank === 'Q')) {
             const counterpart = selectedCard.rank === 'K' ? 'Q' : 'K';
             const hasPair = myHand.some(c => c.suit === selectedCard.suit && c.rank === counterpart);
             const isMelded = gameState.meldedSuits.includes(selectedCard.suit);
 
-            // Meldunek jest możliwy tylko przy rozpoczynaniu nowej lewy (gdy stół jest pusty)
+            // Meldować można tylko przy wyjściu (gdy na stole nie ma jeszcze kart w tej lewie)
             if (hasPair && !isMelded && gameState.trick.length === 0) {
                 const meldBtn = document.createElement('button');
                 meldBtn.innerText = `👑 Zamelduj ${selectedCard.suit} i zagraj ${selectedCard.rank}${selectedCard.symbol}`;
@@ -170,7 +170,7 @@ function renderActions() {
             }
         }
 
-        // Standardowe zagranie wybranej karty (bez meldunku)
+        // Standardowe zagranie wybranej karty
         if (selectedCard) {
             const playBtn = document.createElement('button');
             playBtn.innerText = `Zagraj ${selectedCard.rank}${selectedCard.symbol}`;
@@ -182,7 +182,7 @@ function renderActions() {
         }
     }
 
-    // Faza Licytacji
+    // Licytacja
     if (gameState.phase === 'bid' && gameState.bidder === mySeat) {
         const bidBtn = document.createElement('button');
         const nextBid = gameState.highestBid + 10;
