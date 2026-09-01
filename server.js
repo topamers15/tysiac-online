@@ -91,7 +91,7 @@ function hasFourNines(seat) {
 }
 
 function handleFoldFourNines(seat) {
-    if (gameState.phase !== "bid" || gameState.paused) return;
+    if (gameState.paused) return;
     if (!hasFourNines(seat)) return;
 
     const playerTeam = team(seat);
@@ -143,35 +143,12 @@ function startNewRound() {
     checkBotTurn();
 }
 
-function getCrossMeldCandidate(seat) {
-    if (gameState.phase !== "play" || gameState.trick.length === 0) return null;
-    const previous = gameState.trick[gameState.trick.length - 1];
-    if (!previous || previous.player === seat || previous.card.rank !== "Q" || gameState.meldedSuits.includes(previous.card.suit)) return null;
-
-    return gameState.players[seat].hand.find(c => c.rank === "K" && c.suit === previous.card.suit) || null;
-}
-
-function canPlayCard(seat, card, isCrossMeldAttempt = false) {
+function canPlayCard(seat, card) {
     if (gameState.trick.length === 0) return true;
 
     const leadSuit = gameState.trick[0].card.suit;
     const hand = gameState.players[seat].hand;
     const hasLeadSuit = hand.some(c => c.suit === leadSuit);
-
-    const crossCandidate = getCrossMeldCandidate(seat);
-    if (isCrossMeldAttempt && crossCandidate && card.id === crossCandidate.id) {
-        const highestInLead = gameState.trick
-            .filter(t => t.card.suit === leadSuit)
-            .reduce((best, curr) => curr.card.value > best.card.value ? curr : best);
-
-        const hasHigherThanCurrent = hand.some(c => c.suit === leadSuit && c.value > highestInLead.card.value);
-
-        if (hasHigherThanCurrent && card.value <= highestInLead.card.value) {
-            return false;
-        }
-
-        return true; 
-    }
 
     if (!hasLeadSuit) {
         if (gameState.trump) {
@@ -277,19 +254,13 @@ function botProcessPlay(seat) {
     const hand = gameState.players[seat].hand;
     if (hand.length === 0) return;
 
-    const crossCandidate = getCrossMeldCandidate(seat);
-    if (crossCandidate && canPlayCard(seat, crossCandidate, true)) {
-        handlePlayCard(seat, crossCandidate.id, true);
-        return;
-    }
-
     if (gameState.trick.length === 0) {
         for (let suitObj of SUITS) {
             if (!gameState.meldedSuits.includes(suitObj.name)) {
                 const k = hand.find(c => c.suit === suitObj.name && c.rank === "K");
                 const q = hand.find(c => c.suit === suitObj.name && c.rank === "Q");
                 if (k && q) {
-                    handleDeclareMeld(seat, suitObj.name, k.id);
+                    handlePlayCard(seat, k.id, true);
                     return;
                 }
             }
@@ -379,32 +350,6 @@ function handleExchange(seat, selectedIds, recipients) {
     checkBotTurn();
 }
 
-function handleDeclareMeld(seat, suitName, cardId) {
-    if (gameState.phase !== "play" || gameState.leader !== seat || gameState.trick.length !== 0 || gameState.paused) return;
-
-    const p = gameState.players[seat];
-    if (gameState.meldedSuits.includes(suitName)) return;
-
-    const hasK = p.hand.some(c => c.suit === suitName && c.rank === "K");
-    const hasQ = p.hand.some(c => c.suit === suitName && c.rank === "Q");
-
-    if (hasK && hasQ) {
-        gameState.meldedSuits.push(suitName);
-        gameState.trump = suitName;
-        const suitObj = SUITS.find(s => s.name === suitName);
-        gameState.melds[team(seat)] += suitObj.meld;
-
-        addChat(`SYSTEM: 💍 ${p.name} melduje ${suitName} za ${suitObj.meld} pkt.`);
-        addLog(`💍 ${p.name} meldunek ${suitName} +${suitObj.meld}`);
-
-        if (cardId) {
-            handlePlayCard(seat, cardId, false);
-        } else {
-            io.emit('stateUpdate', gameState);
-        }
-    }
-}
-
 function handlePlayCard(seat, cardId, tryMeld = false) {
     if (gameState.phase !== "play" || gameState.leader !== seat || gameState.paused) return;
 
@@ -414,12 +359,10 @@ function handlePlayCard(seat, cardId, tryMeld = false) {
 
     const card = p.hand[cardIndex];
 
-    if (!canPlayCard(seat, card, tryMeld)) return;
+    if (!canPlayCard(seat, card)) return;
 
-    // KROK 1: Sprawdzenie meldunku ZANIM dodamy kartę do stół (trick)
-    const isOpeningTrick = gameState.trick.length === 0;
-
-    if (isOpeningTrick && (card.rank === "K" || card.rank === "Q") && tryMeld) {
+    // Przetwarzanie meldunku przy wyjściu
+    if (gameState.trick.length === 0 && (card.rank === "K" || card.rank === "Q") && tryMeld) {
         if (!gameState.meldedSuits.includes(card.suit)) {
             const counterpart = card.rank === "K" ? "Q" : "K";
             const hasPair = p.hand.some(c => c.suit === card.suit && c.rank === counterpart);
@@ -434,20 +377,6 @@ function handlePlayCard(seat, cardId, tryMeld = false) {
         }
     }
 
-    // Przemeldowanie (Cross-Meld)
-    const crossCandidate = getCrossMeldCandidate(seat);
-    if (crossCandidate && crossCandidate.id === card.id && tryMeld) {
-        if (!gameState.meldedSuits.includes(card.suit)) {
-            gameState.meldedSuits.push(card.suit);
-            gameState.trump = card.suit;
-            const suitObj = SUITS.find(s => s.name === card.suit);
-            gameState.melds[team(seat)] += suitObj.meld;
-            addChat(`SYSTEM: 💍 ${p.name} przemelduje K na Q (${card.suit}) za ${suitObj.meld} pkt.`);
-            addLog(`💍 ${p.name} przemeldowanie ${card.suit} +${suitObj.meld}`);
-        }
-    }
-
-    // KROK 2: Zabranie karty z ręki i dorzucenie na stół
     p.hand.splice(cardIndex, 1);
     gameState.trick.push({ player: seat, card });
 
@@ -568,7 +497,6 @@ io.on('connection', (socket) => {
     socket.on('bid', ({ seat, amount }) => handleBid(seat, amount));
     socket.on('foldFourNines', ({ seat }) => handleFoldFourNines(seat));
     socket.on('exchangeCards', ({ seat, selectedIds, recipients }) => handleExchange(seat, selectedIds, recipients));
-    socket.on('declareMeld', ({ seat, suit, cardId }) => handleDeclareMeld(seat, suit, cardId));
     socket.on('playCard', ({ seat, cardId, tryMeld }) => handlePlayCard(seat, cardId, tryMeld));
 
     socket.on('sendChat', (text) => {
