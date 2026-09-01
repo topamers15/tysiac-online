@@ -22,33 +22,39 @@
     <div id="game-screen" class="screen" style="display: none;">
         <!-- NAGŁÓWEK / INFORMACJE O GRZE -->
         <header class="game-header">
-            <div class="header-box" id="round-info">Rozdanie: -</div>
-            <div class="header-box" id="score-info">Para 1: 0 | Para 2: 0</div>
-            <div class="header-box" id="trump-info">Atut: Brak</div>
+            <div id="round-info">Rozdanie: -</div>
+            <div id="score-info">Para 1: 0 | Para 2: 0</div>
+            <div id="trump-info">Atut: Brak</div>
         </header>
 
-        <main class="game-board">
-            <!-- LISTA GRACZY -->
-            <div id="players-container" class="players-grid"></div>
+        <!-- LISTA GRACZY -->
+        <div id="players-container" class="players-grid"></div>
 
-            <!-- STÓŁ / KARTY W LEWIE I MUSIK -->
-            <div id="table-area" class="board-section">
-                <h3>Stół</h3>
-                <div id="trick-container" class="cards-flex"></div>
+        <!-- STÓŁ / KARTY W LEWIE I MUSIK -->
+        <div id="table-area">
+            <h3>Stół</h3>
+            <div id="trick-container" class="cards-flex"></div>
+        </div>
+
+        <!-- SEKCJA STEROWANIA I MOJE KARTY -->
+        <div class="controls-and-hand">
+            <div class="turn-info" id="turn-status">Twoja kolej!</div>
+            
+            <!-- DEDYKOWANE PRZYCISKI AKCJI Z ID -->
+            <div class="buttons-row">
+                <button id="play-btn">Zagraj</button>
+                <button id="meld-btn">Meldunek K/Q</button>
+                <button id="declare-meld-btn">Zgłoś Meldunek</button>
             </div>
 
-            <!-- REKA GRACZA -->
-            <div id="my-hand-area" class="board-section">
-                <h3>Twoje karty</h3>
+            <div id="my-hand-area">
+                <div class="hand-label">Twoje karty:</div>
                 <div id="my-hand" class="cards-flex"></div>
             </div>
-
-            <!-- DYNAMICZNY PANEL AKCJI (Tu pojawia się m.in. zielony przycisk meldunku) -->
-            <div id="actions-container" class="actions-panel"></div>
-        </main>
+        </div>
 
         <!-- DZIENNIK GRY I CHAT -->
-        <footer class="bottom-panel">
+        <div class="bottom-panel">
             <div class="log-container">
                 <h4>Przebieg gry</h4>
                 <div id="log-box"></div>
@@ -61,7 +67,7 @@
                     <button id="chat-send-btn">Wyślij</button>
                 </div>
             </div>
-        </footer>
+        </div>
     </div>
 
     <script src="client.js"></script>
