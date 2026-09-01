@@ -3,24 +3,33 @@ const socket = io();
 let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
-let givenCards = []; // Przechowuje przydziały kart podczas wymiany: [{ cardId, targetSeat }]
+let givenCards = [];
 
+// Pobranie elementów HTML
 const loginScreen = document.getElementById('login-screen');
 const gameScreen = document.getElementById('game-screen');
 const playerNameInput = document.getElementById('player-name');
 const joinBtn = document.getElementById('join-btn');
 
+// Akcje gry
 const playBtn = document.getElementById('play-btn');
 const meldBtn = document.getElementById('meld-btn');
 const declareMeldBtn = document.getElementById('declare-meld-btn');
+
+// Akcje licytacji
+const biddingActions = document.getElementById('bidding-actions');
+const bidBtn = document.getElementById('bid-btn');
+const passBtn = document.getElementById('pass-btn');
+
 const modal = document.getElementById('give-card-modal');
 
+// Dołączenie do gry
 joinBtn?.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
     if (name) socket.emit('joinGame', name);
 });
 
-// OBSŁUGA PRZYCISKÓW
+// ZAGRYWANIE KART / PRZEKAZYWANIE
 playBtn?.addEventListener('click', () => {
     if (gameState?.phase === 'exchange') {
         openExchangeModal();
@@ -28,16 +37,17 @@ playBtn?.addEventListener('click', () => {
         socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: false });
         selectedCardId = null;
     } else {
-        alert('Wybierz kartę!');
+        alert('Najpierw wybierz kartę z ręki!');
     }
 });
 
+// MELDOWANIE K/Q
 meldBtn?.addEventListener('click', () => {
     if (selectedCardId !== null && mySeat !== null) {
         socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: true });
         selectedCardId = null;
     } else {
-        alert('Wybierz Króla lub Damę do meldunku!');
+        alert('Wybierz Króla lub Damę do zameldowania!');
     }
 });
 
@@ -48,6 +58,20 @@ declareMeldBtn?.addEventListener('click', () => {
     }
 });
 
+// OBSŁUGA LICYTACJI
+bidBtn?.addEventListener('click', () => {
+    if (mySeat !== null) {
+        socket.emit('makeBid', { seat: mySeat, action: 'raise' });
+    }
+});
+
+passBtn?.addEventListener('click', () => {
+    if (mySeat !== null) {
+        socket.emit('makeBid', { seat: mySeat, action: 'pass' });
+    }
+});
+
+// OBSŁUGA SOCKET.IO
 socket.on('assignedSeat', (seat) => {
     mySeat = seat;
     if (loginScreen) loginScreen.style.display = 'none';
@@ -82,12 +106,30 @@ function renderPlayers() {
 
     gameState.players.forEach((p, idx) => {
         const div = document.createElement('div');
-        div.className = `player-card ${gameState.leader === idx || gameState.bidder === idx ? 'active' : ''}`;
+        const isActive = (gameState.phase === 'bidding' && gameState.currentBidder === idx) ||
+                         (gameState.phase === 'play' && gameState.leader === idx);
+
+        div.className = `player-card ${isActive ? 'active' : ''}`;
+        
+        let botLabel = p.isBot ? ' 🤖' : '';
+        let hostLabel = p.isHost ? ' 👑' : '';
+
         div.innerHTML = `
-            <strong>${p.name}</strong><br>
+            <strong>${p.name}${botLabel}${hostLabel}</strong><br>
             <small>Para ${(idx % 2) + 1}</small><br>
-            🎴 ${p.hand ? p.hand.length : 0}
+            🎴 Cards: ${p.hand ? p.hand.length : 0}
         `;
+
+        // Przycisk dodawania bota (tylko dla Hosta, jeśli jest wolne miejsce)
+        if (gameState.players[mySeat]?.isHost && !p.connected && !p.isBot) {
+            const addBotBtn = document.createElement('button');
+            addBotBtn.className = 'btn btn-primary';
+            addBotBtn.style.cssText = 'padding:2px 6px; font-size:10px; margin-top:5px;';
+            addBotBtn.innerText = '+ Dodaj Bota';
+            addBotBtn.onclick = () => socket.emit('addBot', idx);
+            div.appendChild(addBotBtn);
+        }
+
         playersContainer.appendChild(div);
     });
 }
@@ -128,23 +170,34 @@ function renderMyHand() {
 
 function updateControls() {
     const status = document.getElementById('turn-status');
-    const biddingActions = document.getElementById('bidding-actions');
     const mainActions = document.getElementById('main-actions');
 
-    if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
-        status.innerText = 'Wygrałeś licytację! Wybierz kartę z ręki, a następnie wskaż gracza, któremu chcesz ją oddać.';
+    // Domyślne ukrycie
+    biddingActions.style.display = 'none';
+    mainActions.style.display = 'none';
+
+    if (gameState.phase === 'bidding') {
+        if (gameState.currentBidder === mySeat) {
+            status.innerText = `Licytacja! Aktualna stawka: ${gameState.highestBid || 100}`;
+            biddingActions.style.display = 'flex';
+        } else {
+            status.innerText = 'Trwa licytacja innych graczy...';
+        }
+    } else if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
+        status.innerText = 'Wygrałeś licytację! Zaznacz kartę i wciśnij "Przekaż", aby oddać ją innemu graczowi.';
         mainActions.style.display = 'flex';
         playBtn.innerText = 'Przekaż wybraną kartę...';
-    } else if (gameState.phase === 'play' && gameState.leader === mySeat) {
-        status.innerText = 'Twoja kolej!';
-        mainActions.style.display = 'flex';
-        playBtn.innerText = 'Zagraj';
-    } else {
-        status.innerText = 'Oczekiwanie na ruch...';
+    } else if (gameState.phase === 'play') {
+        if (gameState.leader === mySeat) {
+            status.innerText = 'Twoja kolej!';
+            mainActions.style.display = 'flex';
+            playBtn.innerText = 'Zagraj';
+        } else {
+            status.innerText = 'Oczekiwanie na ruch innego gracza...';
+        }
     }
 }
 
-// WYBÓR GRACZA DLA PRZEKAZYWANEJ KARTY (WYMIANA)
 function openExchangeModal() {
     if (!selectedCardId) {
         alert('Najpierw zaznacz kartę, którą chcesz przekazać!');
@@ -168,14 +221,13 @@ function openExchangeModal() {
                 selectedCardId = null;
                 modal.style.display = 'none';
 
-                if (givenCards.length === 3) {
-                    // Po wybraniu 3 kart wysyłamy do serwera
+                if (givenCards.length === 2) { // Przekazanie 2 kart (po jednej dla przeciwników/partnera)
                     const selectedIds = givenCards.map(g => g.cardId);
                     const recipients = givenCards.map(g => g.targetSeat);
                     socket.emit('exchangeCards', { seat: mySeat, selectedIds, recipients });
                     givenCards = [];
                 } else {
-                    alert(`Przekazano kartę. Wybierz jeszcze ${3 - givenCards.length} kart(y).`);
+                    alert(`Karta przekazana! Wybierz jeszcze ${2 - givenCards.length} kartę.`);
                     renderUI();
                 }
             };
