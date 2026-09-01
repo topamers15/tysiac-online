@@ -3,48 +3,44 @@ const socket = io();
 let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
+let givenCards = []; // Przechowuje przydziały kart podczas wymiany: [{ cardId, targetSeat }]
 
-// Pobranie elementów interfejsu
 const loginScreen = document.getElementById('login-screen');
 const gameScreen = document.getElementById('game-screen');
 const playerNameInput = document.getElementById('player-name');
 const joinBtn = document.getElementById('join-btn');
 
-// Przyciski akcji z Twojego interfejsu
-const playBtn = document.getElementById('play-btn');           // Przycisk "Zagraj"
-const meldBtn = document.getElementById('meld-btn');           // Przycisk "Meldunek K/Q"
-const declareMeldBtn = document.getElementById('declare-meld-btn'); // Przycisk "Zgłoś Meldunek"
+const playBtn = document.getElementById('play-btn');
+const meldBtn = document.getElementById('meld-btn');
+const declareMeldBtn = document.getElementById('declare-meld-btn');
+const modal = document.getElementById('give-card-modal');
 
 joinBtn?.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
-    if (name) {
-        socket.emit('joinGame', name);
-    }
+    if (name) socket.emit('joinGame', name);
 });
 
-// PODPIĘCIE PRZYCISKÓW AKCJI
-
-// 1. Zwykłe zagranie karty
+// OBSŁUGA PRZYCISKÓW
 playBtn?.addEventListener('click', () => {
-    if (selectedCardId !== null && mySeat !== null) {
+    if (gameState?.phase === 'exchange') {
+        openExchangeModal();
+    } else if (selectedCardId !== null && mySeat !== null) {
         socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: false });
         selectedCardId = null;
     } else {
-        alert('Wybierz najpierw kartę do zagrania!');
+        alert('Wybierz kartę!');
     }
 });
 
-// 2. Zagranie z MELDUNKIEM (K/Q)
 meldBtn?.addEventListener('click', () => {
     if (selectedCardId !== null && mySeat !== null) {
         socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: true });
         selectedCardId = null;
     } else {
-        alert('Wybierz najpierw Króla lub Damę do zameldowania!');
+        alert('Wybierz Króla lub Damę do meldunku!');
     }
 });
 
-// 3. Opcjonalny przycisk dodatkowego zgłoszenia
 declareMeldBtn?.addEventListener('click', () => {
     if (selectedCardId !== null && mySeat !== null) {
         socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: true });
@@ -56,13 +52,6 @@ socket.on('assignedSeat', (seat) => {
     mySeat = seat;
     if (loginScreen) loginScreen.style.display = 'none';
     if (gameScreen) gameScreen.style.display = 'block';
-});
-
-socket.on('fullGame', () => alert('Gra jest pełna!'));
-
-socket.on('kicked', () => {
-    alert('Zostałeś usunięty z gry przez hosta.');
-    location.reload();
 });
 
 socket.on('stateUpdate', (state) => {
@@ -78,69 +67,45 @@ function renderUI() {
     renderTable();
     renderMyHand();
     renderLogAndChat();
+    updateControls();
 }
 
 function renderHeader() {
-    const roundInfo = document.getElementById('round-info');
-    const scoreInfo = document.getElementById('score-info');
-    const trumpInfo = document.getElementById('trump-info');
-
-    if (roundInfo) roundInfo.innerText = `Rozdanie: ${gameState.round}`;
-    if (scoreInfo) scoreInfo.innerText = `Para 1: ${gameState.scores[0]} | Para 2: ${gameState.scores[1]}`;
-    
-    let trumpText = gameState.trump ? `${gameState.trump}` : 'Brak';
-    if (trumpInfo) trumpInfo.innerText = `Atut: ${trumpText}`;
+    document.getElementById('round-info').innerText = `Rozdanie: ${gameState.round}`;
+    document.getElementById('score-info').innerText = `Para 1: ${gameState.scores[0]} | Para 2: ${gameState.scores[1]}`;
+    document.getElementById('trump-info').innerText = `Atut: ${gameState.trump || 'Brak'}`;
 }
 
 function renderPlayers() {
     const playersContainer = document.getElementById('players-container');
-    if (!playersContainer) return;
-    
     playersContainer.innerHTML = '';
 
     gameState.players.forEach((p, idx) => {
         const div = document.createElement('div');
-        div.className = `player-card ${gameState.leader === idx ? 'active' : ''}`;
-        
-        let role = idx % 2 === 0 ? 'Para 1' : 'Para 2';
-        let hostBadge = p.isHost ? ' 👑' : '';
-        let botBadge = p.isBot ? ' 🤖' : '';
-
+        div.className = `player-card ${gameState.leader === idx || gameState.bidder === idx ? 'active' : ''}`;
         div.innerHTML = `
-            <strong>${p.name}${hostBadge}${botBadge}</strong><br>
-            <small>${role}</small><br>
-            Karty: ${p.hand ? p.hand.length : 0}
+            <strong>${p.name}</strong><br>
+            <small>Para ${(idx % 2) + 1}</small><br>
+            🎴 ${p.hand ? p.hand.length : 0}
         `;
-
-        if (gameState.players[mySeat]?.isHost && p.seat !== mySeat) {
-            const kickBtn = document.createElement('button');
-            kickBtn.innerText = '❌ Kick';
-            kickBtn.onclick = () => socket.emit('kickPlayer', p.seat);
-            div.appendChild(kickBtn);
-        }
-
         playersContainer.appendChild(div);
     });
 }
 
 function renderTable() {
     const trickContainer = document.getElementById('trick-container');
-    if (!trickContainer) return;
-    
     trickContainer.innerHTML = '';
 
     gameState.trick.forEach(item => {
         const cardDiv = document.createElement('div');
         cardDiv.className = `card ${item.card.red ? 'red' : ''}`;
-        cardDiv.innerHTML = `${item.card.rank}<br>${item.card.symbol}`;
+        cardDiv.innerHTML = `<div>${item.card.rank}</div><div>${item.card.symbol}</div>`;
         trickContainer.appendChild(cardDiv);
     });
 }
 
 function renderMyHand() {
     const handContainer = document.getElementById('my-hand');
-    if (!handContainer) return;
-    
     handContainer.innerHTML = '';
 
     const myHand = gameState.players[mySeat]?.hand || [];
@@ -150,7 +115,7 @@ function renderMyHand() {
         const isSelected = selectedCardId === card.id;
 
         cardDiv.className = `card ${card.red ? 'red' : ''} ${isSelected ? 'selected' : ''}`;
-        cardDiv.innerHTML = `${card.rank}<br>${card.symbol}`;
+        cardDiv.innerHTML = `<div>${card.rank}</div><div>${card.symbol}</div>`;
 
         cardDiv.onclick = () => {
             selectedCardId = card.id;
@@ -159,6 +124,66 @@ function renderMyHand() {
 
         handContainer.appendChild(cardDiv);
     });
+}
+
+function updateControls() {
+    const status = document.getElementById('turn-status');
+    const biddingActions = document.getElementById('bidding-actions');
+    const mainActions = document.getElementById('main-actions');
+
+    if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
+        status.innerText = 'Wygrałeś licytację! Wybierz kartę z ręki, a następnie wskaż gracza, któremu chcesz ją oddać.';
+        mainActions.style.display = 'flex';
+        playBtn.innerText = 'Przekaż wybraną kartę...';
+    } else if (gameState.phase === 'play' && gameState.leader === mySeat) {
+        status.innerText = 'Twoja kolej!';
+        mainActions.style.display = 'flex';
+        playBtn.innerText = 'Zagraj';
+    } else {
+        status.innerText = 'Oczekiwanie na ruch...';
+    }
+}
+
+// WYBÓR GRACZA DLA PRZEKAZYWANEJ KARTY (WYMIANA)
+function openExchangeModal() {
+    if (!selectedCardId) {
+        alert('Najpierw zaznacz kartę, którą chcesz przekazać!');
+        return;
+    }
+
+    const myHand = gameState.players[mySeat]?.hand || [];
+    const card = myHand.find(c => c.id === selectedCardId);
+    
+    document.getElementById('selected-card-name').innerText = `${card.rank}${card.symbol}`;
+    const recipientsDiv = document.getElementById('recipient-buttons');
+    recipientsDiv.innerHTML = '';
+
+    gameState.players.forEach(p => {
+        if (p.seat !== mySeat) {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-primary';
+            btn.innerText = `Oddaj dla: ${p.name}`;
+            btn.onclick = () => {
+                givenCards.push({ cardId: selectedCardId, targetSeat: p.seat });
+                selectedCardId = null;
+                modal.style.display = 'none';
+
+                if (givenCards.length === 3) {
+                    // Po wybraniu 3 kart wysyłamy do serwera
+                    const selectedIds = givenCards.map(g => g.cardId);
+                    const recipients = givenCards.map(g => g.targetSeat);
+                    socket.emit('exchangeCards', { seat: mySeat, selectedIds, recipients });
+                    givenCards = [];
+                } else {
+                    alert(`Przekazano kartę. Wybierz jeszcze ${3 - givenCards.length} kart(y).`);
+                    renderUI();
+                }
+            };
+            recipientsDiv.appendChild(btn);
+        }
+    });
+
+    modal.style.display = 'flex';
 }
 
 function renderLogAndChat() {
