@@ -110,60 +110,6 @@ function renderTable() {
     }
 }
 
-function getCrossMeldCandidate() {
-    if (!gameState || gameState.phase !== "play" || gameState.trick.length === 0) return null;
-    const previous = gameState.trick[gameState.trick.length - 1];
-    if (!previous || previous.player === mySeat || previous.card.rank !== "Q" || gameState.meldedSuits.includes(previous.card.suit)) return null;
-
-    const myHand = gameState.players[mySeat]?.hand || [];
-    return myHand.find(c => c.rank === "K" && c.suit === previous.card.suit) || null;
-}
-
-function canPlayCardClient(card, isCrossMeldAttempt = false) {
-    if (!gameState || gameState.phase !== "play" || gameState.leader !== mySeat) return false;
-
-    const hand = gameState.players[mySeat].hand;
-
-    if (gameState.trick.length === 0) return true;
-
-    const leadSuit = gameState.trick[0].card.suit;
-    const hasLeadSuit = hand.some(c => c.suit === leadSuit);
-
-    const crossCandidate = getCrossMeldCandidate();
-    if (isCrossMeldAttempt && crossCandidate && card.id === crossCandidate.id) {
-        const highestInLead = gameState.trick
-            .filter(t => t.card.suit === leadSuit)
-            .reduce((best, curr) => curr.card.value > best.card.value ? curr : best);
-
-        const hasHigherThanCurrent = hand.some(c => c.suit === leadSuit && c.value > highestInLead.card.value);
-
-        if (hasHigherThanCurrent && card.value <= highestInLead.card.value) {
-            return false;
-        }
-
-        return true; 
-    }
-
-    if (!hasLeadSuit) {
-        if (gameState.trump) {
-            const hasTrump = hand.some(c => c.suit === gameState.trump);
-            if (hasTrump && card.suit !== gameState.trump) return false;
-        }
-        return true;
-    }
-
-    if (card.suit !== leadSuit) return false;
-
-    const highestInLead = gameState.trick
-        .filter(t => t.card.suit === leadSuit)
-        .reduce((best, curr) => curr.card.value > best.card.value ? curr : best);
-
-    const canBeat = hand.some(c => c.suit === leadSuit && c.value > highestInLead.card.value);
-    if (canBeat && card.value <= highestInLead.card.value) return false;
-
-    return true;
-}
-
 function renderMyHand() {
     const handContainer = document.getElementById('my-hand');
     handContainer.innerHTML = '';
@@ -172,40 +118,14 @@ function renderMyHand() {
 
     myHand.forEach(card => {
         const cardDiv = document.createElement('div');
-        const playable = canPlayCardClient(card, false);
-        const playableMeld = canPlayCardClient(card, true);
-
         const isSelected = selectedCardId === card.id;
 
-        cardDiv.className = `card ${card.red ? 'red' : ''} ${playable || playableMeld ? 'playable' : 'disabled'} ${isSelected ? 'selected' : ''}`;
+        cardDiv.className = `card ${card.red ? 'red' : ''} ${isSelected ? 'selected' : ''}`;
         cardDiv.innerHTML = `${card.rank}<br>${card.symbol}`;
 
         cardDiv.onclick = () => {
             selectedCardId = card.id;
-            
-            // Jeśli jest nasza kolej w fazie grania, zagraj kartę
-            if (gameState.phase === 'play' && gameState.leader === mySeat) {
-                const crossCandidate = getCrossMeldCandidate();
-                if (crossCandidate && crossCandidate.id === card.id && canPlayCardClient(card, true)) {
-                    socket.emit('playCard', { seat: mySeat, cardId: card.id, tryMeld: true });
-                    selectedCardId = null;
-                    return;
-                }
-
-                if (canPlayCardClient(card, false)) {
-                    // Automatyczne sprawdzenie meldunku przy wyjściu z ręki K lub Q
-                    const counterpart = card.rank === 'K' ? 'Q' : (card.rank === 'Q' ? 'K' : null);
-                    const hasPair = counterpart && myHand.some(c => c.suit === card.suit && c.rank === counterpart);
-                    const isMelded = gameState.meldedSuits.includes(card.suit);
-
-                    const shouldMeld = gameState.trick.length === 0 && hasPair && !isMelded;
-
-                    socket.emit('playCard', { seat: mySeat, cardId: card.id, tryMeld: shouldMeld });
-                    selectedCardId = null;
-                }
-            } else {
-                renderUI(); // Odśwież zaznaczenie w ręce
-            }
+            renderUI(); // Tylko zaznaczamy kartę w ręce!
         };
 
         handContainer.appendChild(cardDiv);
@@ -216,29 +136,53 @@ function renderActions() {
     const actionsContainer = document.getElementById('actions-container');
     actionsContainer.innerHTML = '';
 
-    // Dedykowana obsługa Przycisk Meldunek K/Q
-    if (gameState.phase === 'play' && gameState.leader === mySeat && gameState.trick.length === 0) {
-        const myHand = gameState.players[mySeat]?.hand || [];
-        const selectedCard = myHand.find(c => c.id === selectedCardId);
+    const myHand = gameState.players[mySeat]?.hand || [];
+    const selectedCard = myHand.find(c => c.id === selectedCardId);
 
+    // Przycisk zgłoszenia 4 dziewiątek (dostępny w licytacji oraz przed wyjściem w pierwszej lewie)
+    const has4Nines = myHand.filter(c => c.rank === "9").length === 4;
+    if (has4Nines && (gameState.phase === 'bid' || (gameState.phase === 'play' && gameState.tricks.length === 0 && gameState.trick.length === 0))) {
+        const ninesBtn = document.createElement('button');
+        ninesBtn.innerText = '🎴 Zgłoś 4 Dziewiątki (Koniec)';
+        ninesBtn.style.backgroundColor = '#d9534f';
+        ninesBtn.onclick = () => socket.emit('foldFourNines', { seat: mySeat });
+        actionsContainer.appendChild(ninesBtn);
+    }
+
+    // Faza zagrywania kart
+    if (gameState.phase === 'play' && gameState.leader === mySeat) {
+        
+        // 1. Dedykowany Przycisk Zamelduj K/Q
         if (selectedCard && (selectedCard.rank === 'K' || selectedCard.rank === 'Q')) {
             const counterpart = selectedCard.rank === 'K' ? 'Q' : 'K';
             const hasPair = myHand.some(c => c.suit === selectedCard.suit && c.rank === counterpart);
             const isMelded = gameState.meldedSuits.includes(selectedCard.suit);
 
-            if (hasPair && !isMelded) {
+            if (hasPair && !isMelded && gameState.trick.length === 0) {
                 const meldBtn = document.createElement('button');
-                meldBtn.innerText = `👑 Zamelduj ${selectedCard.suit}`;
-                meldBtn.className = 'meld-btn';
+                meldBtn.innerText = `👑 Zamelduj ${selectedCard.suit} i zagraj ${selectedCard.rank}`;
+                meldBtn.style.backgroundColor = '#f0ad4e';
                 meldBtn.onclick = () => {
-                    socket.emit('declareMeld', { seat: mySeat, suit: selectedCard.suit, cardId: selectedCard.id });
+                    socket.emit('playCard', { seat: mySeat, cardId: selectedCard.id, tryMeld: true });
                     selectedCardId = null;
                 };
                 actionsContainer.appendChild(meldBtn);
             }
         }
+
+        // 2. Standardowy przycisk wyjścia karta
+        if (selectedCard) {
+            const playBtn = document.createElement('button');
+            playBtn.innerText = `Zagraj ${selectedCard.rank}${selectedCard.symbol}`;
+            playBtn.onclick = () => {
+                socket.emit('playCard', { seat: mySeat, cardId: selectedCard.id, tryMeld: false });
+                selectedCardId = null;
+            };
+            actionsContainer.appendChild(playBtn);
+        }
     }
 
+    // Faza Licytacji
     if (gameState.phase === 'bid' && gameState.bidder === mySeat) {
         const bidBtn = document.createElement('button');
         const nextBid = gameState.highestBid + 10;
@@ -251,16 +195,9 @@ function renderActions() {
 
         actionsContainer.appendChild(bidBtn);
         actionsContainer.appendChild(passBtn);
-
-        const has9s = (gameState.players[mySeat]?.hand || []).filter(c => c.rank === "9").length === 4;
-        if (has9s) {
-            const ninesBtn = document.createElement('button');
-            ninesBtn.innerText = '🎴 Zgłoś 4 Dziewiątki';
-            ninesBtn.onclick = () => socket.emit('foldFourNines', { seat: mySeat });
-            actionsContainer.appendChild(ninesBtn);
-        }
     }
 
+    // Następna runda
     if (gameState.phase === 'next' && gameState.players[mySeat]?.isHost) {
         const nextBtn = document.createElement('button');
         nextBtn.innerText = 'Następna Runda ▶';
