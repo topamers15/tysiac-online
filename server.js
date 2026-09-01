@@ -416,7 +416,10 @@ function handlePlayCard(seat, cardId, tryMeld = false) {
 
     if (!canPlayCard(seat, card, tryMeld)) return;
 
-    if (gameState.trick.length === 0 && (card.rank === "K" || card.rank === "Q") && tryMeld) {
+    // KROK 1: Sprawdzenie meldunku ZANIM dodamy kartę do stół (trick)
+    const isOpeningTrick = gameState.trick.length === 0;
+
+    if (isOpeningTrick && (card.rank === "K" || card.rank === "Q") && tryMeld) {
         if (!gameState.meldedSuits.includes(card.suit)) {
             const counterpart = card.rank === "K" ? "Q" : "K";
             const hasPair = p.hand.some(c => c.suit === card.suit && c.rank === counterpart);
@@ -431,6 +434,7 @@ function handlePlayCard(seat, cardId, tryMeld = false) {
         }
     }
 
+    // Przemeldowanie (Cross-Meld)
     const crossCandidate = getCrossMeldCandidate(seat);
     if (crossCandidate && crossCandidate.id === card.id && tryMeld) {
         if (!gameState.meldedSuits.includes(card.suit)) {
@@ -443,6 +447,7 @@ function handlePlayCard(seat, cardId, tryMeld = false) {
         }
     }
 
+    // KROK 2: Zabranie karty z ręki i dorzucenie na stół
     p.hand.splice(cardIndex, 1);
     gameState.trick.push({ player: seat, card });
 
