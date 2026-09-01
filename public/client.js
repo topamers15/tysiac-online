@@ -4,22 +4,58 @@ let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
 
+// Pobranie elementów interfejsu
 const loginScreen = document.getElementById('login-screen');
 const gameScreen = document.getElementById('game-screen');
 const playerNameInput = document.getElementById('player-name');
 const joinBtn = document.getElementById('join-btn');
 
-joinBtn.addEventListener('click', () => {
+// Przyciski akcji z Twojego interfejsu
+const playBtn = document.getElementById('play-btn');           // Przycisk "Zagraj"
+const meldBtn = document.getElementById('meld-btn');           // Przycisk "Meldunek K/Q"
+const declareMeldBtn = document.getElementById('declare-meld-btn'); // Przycisk "Zgłoś Meldunek"
+
+joinBtn?.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
     if (name) {
         socket.emit('joinGame', name);
     }
 });
 
+// PODPIĘCIE PRZYCISKÓW AKCJI
+
+// 1. Zwykłe zagranie karty
+playBtn?.addEventListener('click', () => {
+    if (selectedCardId !== null && mySeat !== null) {
+        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: false });
+        selectedCardId = null;
+    } else {
+        alert('Wybierz najpierw kartę do zagrania!');
+    }
+});
+
+// 2. Zagranie z MELDUNKIEM (K/Q)
+meldBtn?.addEventListener('click', () => {
+    if (selectedCardId !== null && mySeat !== null) {
+        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: true });
+        selectedCardId = null;
+    } else {
+        alert('Wybierz najpierw Króla lub Damę do zameldowania!');
+    }
+});
+
+// 3. Opcjonalny przycisk dodatkowego zgłoszenia
+declareMeldBtn?.addEventListener('click', () => {
+    if (selectedCardId !== null && mySeat !== null) {
+        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: true });
+        selectedCardId = null;
+    }
+});
+
 socket.on('assignedSeat', (seat) => {
     mySeat = seat;
-    loginScreen.style.display = 'none';
-    gameScreen.style.display = 'block';
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (gameScreen) gameScreen.style.display = 'block';
 });
 
 socket.on('fullGame', () => alert('Gra jest pełna!'));
@@ -41,20 +77,25 @@ function renderUI() {
     renderPlayers();
     renderTable();
     renderMyHand();
-    renderActions();
     renderLogAndChat();
 }
 
 function renderHeader() {
-    document.getElementById('round-info').innerText = `Rozdanie: ${gameState.round}`;
-    document.getElementById('score-info').innerText = `Para 1: ${gameState.scores[0]} | Para 2: ${gameState.scores[1]}`;
+    const roundInfo = document.getElementById('round-info');
+    const scoreInfo = document.getElementById('score-info');
+    const trumpInfo = document.getElementById('trump-info');
+
+    if (roundInfo) roundInfo.innerText = `Rozdanie: ${gameState.round}`;
+    if (scoreInfo) scoreInfo.innerText = `Para 1: ${gameState.scores[0]} | Para 2: ${gameState.scores[1]}`;
     
     let trumpText = gameState.trump ? `${gameState.trump}` : 'Brak';
-    document.getElementById('trump-info').innerText = `Atut: ${trumpText}`;
+    if (trumpInfo) trumpInfo.innerText = `Atut: ${trumpText}`;
 }
 
 function renderPlayers() {
     const playersContainer = document.getElementById('players-container');
+    if (!playersContainer) return;
+    
     playersContainer.innerHTML = '';
 
     gameState.players.forEach((p, idx) => {
@@ -80,17 +121,12 @@ function renderPlayers() {
 
         playersContainer.appendChild(div);
     });
-
-    if (gameState.players[mySeat]?.isHost && gameState.players.length < 4) {
-        const addBotBtn = document.createElement('button');
-        addBotBtn.innerText = '🤖 Dodaj Bota';
-        addBotBtn.onclick = () => socket.emit('addBot');
-        playersContainer.appendChild(addBotBtn);
-    }
 }
 
 function renderTable() {
     const trickContainer = document.getElementById('trick-container');
+    if (!trickContainer) return;
+    
     trickContainer.innerHTML = '';
 
     gameState.trick.forEach(item => {
@@ -99,17 +135,12 @@ function renderTable() {
         cardDiv.innerHTML = `${item.card.rank}<br>${item.card.symbol}`;
         trickContainer.appendChild(cardDiv);
     });
-
-    if (gameState.phase === 'show_musik') {
-        const musikDiv = document.createElement('div');
-        musikDiv.className = 'musik-preview';
-        musikDiv.innerHTML = '<strong>Musik:</strong> ' + gameState.musik.map(c => `${c.rank}${c.symbol}`).join(' ');
-        trickContainer.appendChild(musikDiv);
-    }
 }
 
 function renderMyHand() {
     const handContainer = document.getElementById('my-hand');
+    if (!handContainer) return;
+    
     handContainer.innerHTML = '';
 
     const myHand = gameState.players[mySeat]?.hand || [];
@@ -128,82 +159,6 @@ function renderMyHand() {
 
         handContainer.appendChild(cardDiv);
     });
-}
-
-function renderActions() {
-    const actionsContainer = document.getElementById('actions-container');
-    actionsContainer.innerHTML = '';
-
-    const myHand = gameState.players[mySeat]?.hand || [];
-    const selectedCard = myHand.find(c => c.id === selectedCardId);
-
-    // Zgłoszenie 4 dziewiątek
-    const has4Nines = myHand.filter(c => c.rank === "9").length === 4;
-    if (has4Nines && (gameState.phase === 'bid' || (gameState.phase === 'play' && gameState.tricks.length === 0 && gameState.trick.length === 0))) {
-        const ninesBtn = document.createElement('button');
-        ninesBtn.innerText = '🎴 Zgłoś 4 Dziewiątki (Koniec)';
-        ninesBtn.style.backgroundColor = '#d9534f';
-        ninesBtn.onclick = () => socket.emit('foldFourNines', { seat: mySeat });
-        actionsContainer.appendChild(ninesBtn);
-    }
-
-    // Ruch w fazie rozgrywki
-    if (gameState.phase === 'play' && gameState.leader === mySeat) {
-
-        // Przycisk Zamelduj K/Q — generowany dynamicznie tylko wtedy, gdy posiadasz parę K+Q w tym samym kolorze
-        if (selectedCard && (selectedCard.rank === 'K' || selectedCard.rank === 'Q')) {
-            const counterpart = selectedCard.rank === 'K' ? 'Q' : 'K';
-            const hasPair = myHand.some(c => c.suit === selectedCard.suit && c.rank === counterpart);
-            const isMelded = gameState.meldedSuits.includes(selectedCard.suit);
-
-            // Meldować można tylko przy wyjściu (gdy na stole nie ma jeszcze kart w tej lewie)
-            if (hasPair && !isMelded && gameState.trick.length === 0) {
-                const meldBtn = document.createElement('button');
-                meldBtn.innerText = `👑 Zamelduj ${selectedCard.suit} i zagraj ${selectedCard.rank}${selectedCard.symbol}`;
-                meldBtn.style.backgroundColor = '#28a745';
-                meldBtn.style.color = '#ffffff';
-                meldBtn.onclick = () => {
-                    socket.emit('playCard', { seat: mySeat, cardId: selectedCard.id, tryMeld: true });
-                    selectedCardId = null;
-                };
-                actionsContainer.appendChild(meldBtn);
-            }
-        }
-
-        // Standardowe zagranie wybranej karty
-        if (selectedCard) {
-            const playBtn = document.createElement('button');
-            playBtn.innerText = `Zagraj ${selectedCard.rank}${selectedCard.symbol}`;
-            playBtn.onclick = () => {
-                socket.emit('playCard', { seat: mySeat, cardId: selectedCard.id, tryMeld: false });
-                selectedCardId = null;
-            };
-            actionsContainer.appendChild(playBtn);
-        }
-    }
-
-    // Licytacja
-    if (gameState.phase === 'bid' && gameState.bidder === mySeat) {
-        const bidBtn = document.createElement('button');
-        const nextBid = gameState.highestBid + 10;
-        bidBtn.innerText = `Licytuj ${nextBid}`;
-        bidBtn.onclick = () => socket.emit('bid', { seat: mySeat, amount: nextBid });
-
-        const passBtn = document.createElement('button');
-        passBtn.innerText = 'Pas';
-        passBtn.onclick = () => socket.emit('bid', { seat: mySeat, amount: 0 });
-
-        actionsContainer.appendChild(bidBtn);
-        actionsContainer.appendChild(passBtn);
-    }
-
-    // Przejście do nowej rundy
-    if (gameState.phase === 'next' && gameState.players[mySeat]?.isHost) {
-        const nextBtn = document.createElement('button');
-        nextBtn.innerText = 'Następna Runda ▶';
-        nextBtn.onclick = () => socket.emit('nextRound');
-        actionsContainer.appendChild(nextBtn);
-    }
 }
 
 function renderLogAndChat() {
