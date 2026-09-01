@@ -361,7 +361,7 @@ function handlePlayCard(seat, cardId, tryMeld = false) {
 
     if (!canPlayCard(seat, card)) return;
 
-    // Przetwarzanie meldunku przy wyjściu
+    // Przetwarzanie meldunku
     if (gameState.trick.length === 0 && (card.rank === "K" || card.rank === "Q") && tryMeld) {
         if (!gameState.meldedSuits.includes(card.suit)) {
             const counterpart = card.rank === "K" ? "Q" : "K";
@@ -369,10 +369,13 @@ function handlePlayCard(seat, cardId, tryMeld = false) {
             if (hasPair) {
                 gameState.meldedSuits.push(card.suit);
                 gameState.trump = card.suit;
+                
                 const suitObj = SUITS.find(s => s.name === card.suit);
-                gameState.melds[team(seat)] += suitObj.meld;
-                addChat(`SYSTEM: 💍 ${p.name} melduje ${card.suit} za ${suitObj.meld} pkt.`);
-                addLog(`💍 ${p.name} meldunek ${card.suit} +${suitObj.meld}`);
+                if (suitObj) {
+                    gameState.melds[team(seat)] += suitObj.meld;
+                    addChat(`SYSTEM: 💍 ${p.name} melduje ${card.suit} za ${suitObj.meld} pkt.`);
+                    addLog(`💍 ${p.name} meldunek ${card.suit} +${suitObj.meld}`);
+                }
             }
         }
     }
@@ -407,7 +410,6 @@ io.on('connection', (socket) => {
 
         if (gameState.players.length < 4) {
             const seat = gameState.players.length;
-            
             const onlyBots = gameState.players.every(p => p.isBot);
             const isHost = gameState.players.length === 0 || onlyBots;
 
@@ -419,7 +421,6 @@ io.on('connection', (socket) => {
             socket.emit('assignedSeat', seat);
             
             addChat(`SYSTEM: Dołączył ${name} (Gracz ${seat + 1})${isHost ? ' [HOST]' : ''}.`);
-
             updateHosts();
 
             if (gameState.players.length === 4) {
