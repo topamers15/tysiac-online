@@ -58,16 +58,17 @@ declareMeldBtn?.addEventListener('click', () => {
     }
 });
 
-// OBSŁUGA LICYTACJI
+// OBSŁUGA LICYTACJI (zgodna z serwerem)
 bidBtn?.addEventListener('click', () => {
-    if (mySeat !== null) {
-        socket.emit('makeBid', { seat: mySeat, action: 'raise' });
+    if (mySeat !== null && gameState) {
+        const nextBid = (gameState.highestBid || 100) + 10;
+        socket.emit('bid', { seat: mySeat, amount: nextBid });
     }
 });
 
 passBtn?.addEventListener('click', () => {
     if (mySeat !== null) {
-        socket.emit('makeBid', { seat: mySeat, action: 'pass' });
+        socket.emit('bid', { seat: mySeat, amount: 0 });
     }
 });
 
@@ -106,7 +107,7 @@ function renderPlayers() {
 
     gameState.players.forEach((p, idx) => {
         const div = document.createElement('div');
-        const isActive = (gameState.phase === 'bidding' && gameState.currentBidder === idx) ||
+        const isActive = (gameState.phase === 'bid' && gameState.bidder === idx) ||
                          (gameState.phase === 'play' && gameState.leader === idx);
 
         div.className = `player-card ${isActive ? 'active' : ''}`;
@@ -120,13 +121,12 @@ function renderPlayers() {
             🎴 Cards: ${p.hand ? p.hand.length : 0}
         `;
 
-        // Przycisk dodawania bota (tylko dla Hosta, jeśli jest wolne miejsce)
-        if (gameState.players[mySeat]?.isHost && !p.connected && !p.isBot) {
+        if (gameState.players[mySeat]?.isHost && !p.connected && !p.isBot && gameState.players.length < 4) {
             const addBotBtn = document.createElement('button');
             addBotBtn.className = 'btn btn-primary';
             addBotBtn.style.cssText = 'padding:2px 6px; font-size:10px; margin-top:5px;';
             addBotBtn.innerText = '+ Dodaj Bota';
-            addBotBtn.onclick = () => socket.emit('addBot', idx);
+            addBotBtn.onclick = () => socket.emit('addBot');
             div.appendChild(addBotBtn);
         }
 
@@ -172,26 +172,36 @@ function updateControls() {
     const status = document.getElementById('turn-status');
     const mainActions = document.getElementById('main-actions');
 
-    // Domyślne ukrycie
+    if (!biddingActions || !mainActions || !status) return;
+
+    // Reset widoczności
     biddingActions.style.display = 'none';
     mainActions.style.display = 'none';
 
-    if (gameState.phase === 'bidding') {
-        if (gameState.currentBidder === mySeat) {
-            status.innerText = `Licytacja! Aktualna stawka: ${gameState.highestBid || 100}`;
+    // Obsługa fazy LICYTACJI ("bid")
+    if (gameState.phase === 'bid') {
+        if (gameState.bidder === mySeat) {
+            const nextBid = (gameState.highestBid || 100) + 10;
+            status.innerText = `Twoja kolej na licytację! (Następna stawka: ${nextBid})`;
             biddingActions.style.display = 'flex';
+            if (bidBtn) bidBtn.innerText = `Licytuj ${nextBid}`;
         } else {
-            status.innerText = 'Trwa licytacja innych graczy...';
+            const currentBidderName = gameState.players[gameState.bidder]?.name || 'innego gracza';
+            status.innerText = `Licytuje: ${currentBidderName} (Aktualnie: ${gameState.highestBid})`;
         }
-    } else if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
-        status.innerText = 'Wygrałeś licytację! Zaznacz kartę i wciśnij "Przekaż", aby oddać ją innemu graczowi.';
+    } 
+    // Obsługa fazy PRZEKAZYWANIA KART ("exchange")
+    else if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
+        status.innerText = 'Wygrałeś licytację! Zaznacz kartę i wciśnij przycisk, aby oddać ją wybranemu graczowi.';
         mainActions.style.display = 'flex';
-        playBtn.innerText = 'Przekaż wybraną kartę...';
-    } else if (gameState.phase === 'play') {
+        if (playBtn) playBtn.innerText = 'Przekaż wybraną kartę...';
+    } 
+    // Obsługa fazy ROZGRYWKI ("play")
+    else if (gameState.phase === 'play') {
         if (gameState.leader === mySeat) {
-            status.innerText = 'Twoja kolej!';
+            status.innerText = 'Twoja kolej na ruch!';
             mainActions.style.display = 'flex';
-            playBtn.innerText = 'Zagraj';
+            if (playBtn) playBtn.innerText = 'Zagraj';
         } else {
             status.innerText = 'Oczekiwanie na ruch innego gracza...';
         }
@@ -221,13 +231,13 @@ function openExchangeModal() {
                 selectedCardId = null;
                 modal.style.display = 'none';
 
-                if (givenCards.length === 2) { // Przekazanie 2 kart (po jednej dla przeciwników/partnera)
+                if (givenCards.length === 3) {
                     const selectedIds = givenCards.map(g => g.cardId);
                     const recipients = givenCards.map(g => g.targetSeat);
                     socket.emit('exchangeCards', { seat: mySeat, selectedIds, recipients });
                     givenCards = [];
                 } else {
-                    alert(`Karta przekazana! Wybierz jeszcze ${2 - givenCards.length} kartę.`);
+                    alert(`Karta przekazana! Wybierz jeszcze ${3 - givenCards.length} kart(y).`);
                     renderUI();
                 }
             };
