@@ -5,60 +5,44 @@ let gameState = null;
 let selectedCardId = null;
 let givenCards = [];
 
-// Pobranie elementów HTML
 const loginScreen = document.getElementById('login-screen');
 const gameScreen = document.getElementById('game-screen');
 const playerNameInput = document.getElementById('player-name');
 const joinBtn = document.getElementById('join-btn');
 
-// Akcje gry
 const playBtn = document.getElementById('play-btn');
 const meldBtn = document.getElementById('meld-btn');
-const declareMeldBtn = document.getElementById('declare-meld-btn');
 
-// Akcje licytacji
 const biddingActions = document.getElementById('bidding-actions');
+const mainActions = document.getElementById('main-actions');
 const bidBtn = document.getElementById('bid-btn');
 const passBtn = document.getElementById('pass-btn');
 
 const modal = document.getElementById('give-card-modal');
 
-// Dołączenie do gry
 joinBtn?.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
     if (name) socket.emit('joinGame', name);
 });
 
-// ZAGRYWANIE KART / PRZEKAZYWANIE
 playBtn?.addEventListener('click', () => {
     if (gameState?.phase === 'exchange') {
         openExchangeModal();
     } else if (selectedCardId !== null && mySeat !== null) {
-        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: false });
+        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId });
         selectedCardId = null;
     } else {
-        alert('Najpierw wybierz kartę z ręki!');
+        alert('Wybierz kartę!');
     }
 });
 
-// MELDOWANIE K/Q
 meldBtn?.addEventListener('click', () => {
     if (selectedCardId !== null && mySeat !== null) {
-        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: true });
-        selectedCardId = null;
-    } else {
-        alert('Wybierz Króla lub Damę do zameldowania!');
-    }
-});
-
-declareMeldBtn?.addEventListener('click', () => {
-    if (selectedCardId !== null && mySeat !== null) {
-        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, tryMeld: true });
+        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId });
         selectedCardId = null;
     }
 });
 
-// OBSŁUGA LICYTACJI (zgodna z serwerem)
 bidBtn?.addEventListener('click', () => {
     if (mySeat !== null && gameState) {
         const nextBid = (gameState.highestBid || 100) + 10;
@@ -67,12 +51,22 @@ bidBtn?.addEventListener('click', () => {
 });
 
 passBtn?.addEventListener('click', () => {
-    if (mySeat !== null) {
-        socket.emit('bid', { seat: mySeat, amount: 0 });
-    }
+    if (mySeat !== null) socket.emit('bid', { seat: mySeat, amount: 0 });
 });
 
-// OBSŁUGA SOCKET.IO
+document.getElementById('chat-send-btn')?.addEventListener('click', sendChat);
+document.getElementById('chat-input')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendChat();
+});
+
+function sendChat() {
+    const input = document.getElementById('chat-input');
+    if (input.value.trim()) {
+        socket.emit('chatMessage', input.value.trim());
+        input.value = '';
+    }
+}
+
 socket.on('assignedSeat', (seat) => {
     mySeat = seat;
     if (loginScreen) loginScreen.style.display = 'none';
@@ -86,7 +80,6 @@ socket.on('stateUpdate', (state) => {
 
 function renderUI() {
     if (!gameState) return;
-
     renderHeader();
     renderPlayers();
     renderTable();
@@ -104,6 +97,7 @@ function renderHeader() {
 function renderPlayers() {
     const playersContainer = document.getElementById('players-container');
     playersContainer.innerHTML = '';
+    const isHost = gameState.players[mySeat]?.isHost;
 
     gameState.players.forEach((p, idx) => {
         const div = document.createElement('div');
@@ -111,33 +105,51 @@ function renderPlayers() {
                          (gameState.phase === 'play' && gameState.leader === idx);
 
         div.className = `player-card ${isActive ? 'active' : ''}`;
-        
-        let botLabel = p.isBot ? ' 🤖' : '';
-        let hostLabel = p.isHost ? ' 👑' : '';
-
         div.innerHTML = `
-            <strong>${p.name}${botLabel}${hostLabel}</strong><br>
+            <strong>${p.name}${p.isBot ? ' 🤖' : ''}${p.isHost ? ' 👑' : ''}</strong><br>
             <small>Para ${(idx % 2) + 1}</small><br>
-            🎴 Cards: ${p.hand ? p.hand.length : 0}
+            🎴 Karty: ${p.hand ? p.hand.length : 0}
         `;
 
-        if (gameState.players[mySeat]?.isHost && !p.connected && !p.isBot && gameState.players.length < 4) {
-            const addBotBtn = document.createElement('button');
-            addBotBtn.className = 'btn btn-primary';
-            addBotBtn.style.cssText = 'padding:2px 6px; font-size:10px; margin-top:5px;';
-            addBotBtn.innerText = '+ Dodaj Bota';
-            addBotBtn.onclick = () => socket.emit('addBot');
-            div.appendChild(addBotBtn);
+        if (isHost && p.isBot) {
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn btn-danger';
+            removeBtn.style.cssText = 'padding: 2px 6px; font-size: 10px; margin-top: 5px; width: 100%;';
+            removeBtn.innerText = '❌ Usuń Bota';
+            removeBtn.onclick = () => socket.emit('removeBot', p.seat);
+            div.appendChild(removeBtn);
         }
 
         playersContainer.appendChild(div);
     });
+
+    if (isHost && gameState.players.length < 4 && gameState.phase === 'waiting') {
+        const addBotBtn = document.createElement('button');
+        addBotBtn.className = 'btn btn-primary';
+        addBotBtn.style.cssText = 'padding: 6px 12px; font-size: 12px; margin-left: 10px; align-self: center;';
+        addBotBtn.innerText = '🤖 + Dodaj Bota';
+        addBotBtn.onclick = () => socket.emit('addBot');
+        playersContainer.appendChild(addBotBtn);
+    }
 }
 
 function renderTable() {
     const trickContainer = document.getElementById('trick-container');
+    const tableLabel = document.getElementById('table-label');
     trickContainer.innerHTML = '';
 
+    if (gameState.phase === 'bid') {
+        tableLabel.innerText = 'MUSIK (ZAKRYTY)';
+        gameState.musik.forEach(() => {
+            const cardDiv = document.createElement('div');
+            cardDiv.className = 'card card-back';
+            cardDiv.innerHTML = '🎴';
+            trickContainer.appendChild(cardDiv);
+        });
+        return;
+    }
+
+    tableLabel.innerText = 'STÓŁ';
     gameState.trick.forEach(item => {
         const cardDiv = document.createElement('div');
         cardDiv.className = `card ${item.card.red ? 'red' : ''}`;
@@ -149,7 +161,6 @@ function renderTable() {
 function renderMyHand() {
     const handContainer = document.getElementById('my-hand');
     handContainer.innerHTML = '';
-
     const myHand = gameState.players[mySeat]?.hand || [];
 
     myHand.forEach(card => {
@@ -158,7 +169,6 @@ function renderMyHand() {
 
         cardDiv.className = `card ${card.red ? 'red' : ''} ${isSelected ? 'selected' : ''}`;
         cardDiv.innerHTML = `<div>${card.rank}</div><div>${card.symbol}</div>`;
-
         cardDiv.onclick = () => {
             selectedCardId = card.id;
             renderUI();
@@ -170,49 +180,37 @@ function renderMyHand() {
 
 function updateControls() {
     const status = document.getElementById('turn-status');
-    const mainActions = document.getElementById('main-actions');
-
     if (!biddingActions || !mainActions || !status) return;
 
-    // Reset widoczności
     biddingActions.style.display = 'none';
     mainActions.style.display = 'none';
 
-    // Obsługa fazy LICYTACJI ("bid")
     if (gameState.phase === 'bid') {
         if (gameState.bidder === mySeat) {
             const nextBid = (gameState.highestBid || 100) + 10;
-            status.innerText = `Twoja kolej na licytację! (Następna stawka: ${nextBid})`;
+            status.innerText = `Twoja kolej! Licytujesz.`;
             biddingActions.style.display = 'flex';
             if (bidBtn) bidBtn.innerText = `Licytuj ${nextBid}`;
         } else {
-            const currentBidderName = gameState.players[gameState.bidder]?.name || 'innego gracza';
-            status.innerText = `Licytuje: ${currentBidderName} (Aktualnie: ${gameState.highestBid})`;
+            status.innerText = `Licytuje: ${gameState.players[gameState.bidder]?.name} (${gameState.highestBid} pkt)`;
         }
-    } 
-    // Obsługa fazy PRZEKAZYWANIA KART ("exchange")
-    else if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
-        status.innerText = 'Wygrałeś licytację! Zaznacz kartę i wciśnij przycisk, aby oddać ją wybranemu graczowi.';
+    } else if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
+        status.innerText = 'Zaznacz kartę i kliknij przycisk poniżej, aby przekazać 2 karty przeciwnikom.';
         mainActions.style.display = 'flex';
-        if (playBtn) playBtn.innerText = 'Przekaż wybraną kartę...';
-    } 
-    // Obsługa fazy ROZGRYWKI ("play")
-    else if (gameState.phase === 'play') {
+        if (playBtn) playBtn.innerText = 'Przekaż kartę...';
+    } else if (gameState.phase === 'play') {
         if (gameState.leader === mySeat) {
             status.innerText = 'Twoja kolej na ruch!';
             mainActions.style.display = 'flex';
             if (playBtn) playBtn.innerText = 'Zagraj';
         } else {
-            status.innerText = 'Oczekiwanie na ruch innego gracza...';
+            status.innerText = 'Czekaj na ruch innego gracza...';
         }
     }
 }
 
 function openExchangeModal() {
-    if (!selectedCardId) {
-        alert('Najpierw zaznacz kartę, którą chcesz przekazać!');
-        return;
-    }
+    if (!selectedCardId) return alert('Najpierw zaznacz kartę z ręki!');
 
     const myHand = gameState.players[mySeat]?.hand || [];
     const card = myHand.find(c => c.id === selectedCardId);
@@ -231,13 +229,13 @@ function openExchangeModal() {
                 selectedCardId = null;
                 modal.style.display = 'none';
 
-                if (givenCards.length === 3) {
+                if (givenCards.length === 2) {
                     const selectedIds = givenCards.map(g => g.cardId);
                     const recipients = givenCards.map(g => g.targetSeat);
                     socket.emit('exchangeCards', { seat: mySeat, selectedIds, recipients });
                     givenCards = [];
                 } else {
-                    alert(`Karta przekazana! Wybierz jeszcze ${3 - givenCards.length} kart(y).`);
+                    alert(`Karta przekazana! Wybierz jeszcze 1 kartę.`);
                     renderUI();
                 }
             };
