@@ -22,9 +22,7 @@ socket.on('assignedSeat', (seat) => {
     gameScreen.style.display = 'block';
 });
 
-socket.on('fullGame', () => {
-    alert('Gra jest pełna!');
-});
+socket.on('fullGame', () => alert('Gra jest pełna!'));
 
 socket.on('kicked', () => {
     alert('Zostałeś usunięty z gry przez hosta.');
@@ -125,7 +123,7 @@ function renderMyHand() {
 
         cardDiv.onclick = () => {
             selectedCardId = card.id;
-            renderUI(); // Tylko zaznaczamy kartę w ręce!
+            renderUI();
         };
 
         handContainer.appendChild(cardDiv);
@@ -139,7 +137,7 @@ function renderActions() {
     const myHand = gameState.players[mySeat]?.hand || [];
     const selectedCard = myHand.find(c => c.id === selectedCardId);
 
-    // Przycisk zgłoszenia 4 dziewiątek (dostępny w licytacji oraz przed wyjściem w pierwszej lewie)
+    // Zgłoszenie 4 dziewiątek
     const has4Nines = myHand.filter(c => c.rank === "9").length === 4;
     if (has4Nines && (gameState.phase === 'bid' || (gameState.phase === 'play' && gameState.tricks.length === 0 && gameState.trick.length === 0))) {
         const ninesBtn = document.createElement('button');
@@ -149,19 +147,21 @@ function renderActions() {
         actionsContainer.appendChild(ninesBtn);
     }
 
-    // Faza zagrywania kart
+    // Faza rozgrywki - ruch gracza
     if (gameState.phase === 'play' && gameState.leader === mySeat) {
-        
-        // 1. Dedykowany Przycisk Zamelduj K/Q
+
+        // Przycisk Zamelduj K/Q (widoczny tylko przy zaznaczonej Damię/Królu posiadającym parę)
         if (selectedCard && (selectedCard.rank === 'K' || selectedCard.rank === 'Q')) {
             const counterpart = selectedCard.rank === 'K' ? 'Q' : 'K';
             const hasPair = myHand.some(c => c.suit === selectedCard.suit && c.rank === counterpart);
             const isMelded = gameState.meldedSuits.includes(selectedCard.suit);
 
+            // Meldunek jest możliwy tylko przy rozpoczynaniu nowej lewy (gdy stół jest pusty)
             if (hasPair && !isMelded && gameState.trick.length === 0) {
                 const meldBtn = document.createElement('button');
-                meldBtn.innerText = `👑 Zamelduj ${selectedCard.suit} i zagraj ${selectedCard.rank}`;
-                meldBtn.style.backgroundColor = '#f0ad4e';
+                meldBtn.innerText = `👑 Zamelduj ${selectedCard.suit} i zagraj ${selectedCard.rank}${selectedCard.symbol}`;
+                meldBtn.style.backgroundColor = '#28a745';
+                meldBtn.style.color = '#ffffff';
                 meldBtn.onclick = () => {
                     socket.emit('playCard', { seat: mySeat, cardId: selectedCard.id, tryMeld: true });
                     selectedCardId = null;
@@ -170,7 +170,7 @@ function renderActions() {
             }
         }
 
-        // 2. Standardowy przycisk wyjścia karta
+        // Standardowe zagranie wybranej karty (bez meldunku)
         if (selectedCard) {
             const playBtn = document.createElement('button');
             playBtn.innerText = `Zagraj ${selectedCard.rank}${selectedCard.symbol}`;
@@ -197,7 +197,7 @@ function renderActions() {
         actionsContainer.appendChild(passBtn);
     }
 
-    // Następna runda
+    // Przejście do nowej rundy
     if (gameState.phase === 'next' && gameState.players[mySeat]?.isHost) {
         const nextBtn = document.createElement('button');
         nextBtn.innerText = 'Następna Runda ▶';
@@ -208,8 +208,8 @@ function renderActions() {
 
 function renderLogAndChat() {
     const logBox = document.getElementById('log-box');
-    logBox.innerHTML = gameState.log.map(l => `<div>${l}</div>`).join('');
+    if (logBox) logBox.innerHTML = gameState.log.map(l => `<div>${l}</div>`).join('');
 
     const chatBox = document.getElementById('chat-box');
-    chatBox.innerHTML = gameState.chat.map(c => `<div>${c}</div>`).join('');
+    if (chatBox) chatBox.innerHTML = gameState.chat.map(c => `<div>${c}</div>`).join('');
 }
