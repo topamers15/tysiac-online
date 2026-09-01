@@ -2,6 +2,7 @@ const socket = io();
 
 let mySeat = null;
 let gameState = null;
+let selectedCardId = null;
 
 const loginScreen = document.getElementById('login-screen');
 const gameScreen = document.getElementById('game-screen');
@@ -128,7 +129,6 @@ function canPlayCardClient(card, isCrossMeldAttempt = false) {
     const leadSuit = gameState.trick[0].card.suit;
     const hasLeadSuit = hand.some(c => c.suit === leadSuit);
 
-    // Wyjątek przemeldowania z wymogiem stanięcia
     const crossCandidate = getCrossMeldCandidate();
     if (isCrossMeldAttempt && crossCandidate && card.id === crossCandidate.id) {
         const highestInLead = gameState.trick
@@ -175,39 +175,38 @@ function renderMyHand() {
         const playable = canPlayCardClient(card, false);
         const playableMeld = canPlayCardClient(card, true);
 
-        cardDiv.className = `card ${card.red ? 'red' : ''} ${playable || playableMeld ? 'playable' : 'disabled'}`;
+        const isSelected = selectedCardId === card.id;
+
+        cardDiv.className = `card ${card.red ? 'red' : ''} ${playable || playableMeld ? 'playable' : 'disabled'} ${isSelected ? 'selected' : ''}`;
         cardDiv.innerHTML = `${card.rank}<br>${card.symbol}`;
 
-        if (gameState.phase === 'play' && gameState.leader === mySeat) {
-            cardDiv.onclick = () => {
-                // 1. Sprawdzenie Przemeldowania (Cross-Meld)
+        cardDiv.onclick = () => {
+            selectedCardId = card.id;
+            
+            // Jeśli jest nasza kolej w fazie grania, zagraj kartę
+            if (gameState.phase === 'play' && gameState.leader === mySeat) {
                 const crossCandidate = getCrossMeldCandidate();
-                if (crossCandidate && crossCandidate.id === card.id) {
-                    if (canPlayCardClient(card, true)) {
-                        socket.emit('playCard', { seat: mySeat, cardId: card.id, tryMeld: true });
-                        return;
-                    }
+                if (crossCandidate && crossCandidate.id === card.id && canPlayCardClient(card, true)) {
+                    socket.emit('playCard', { seat: mySeat, cardId: card.id, tryMeld: true });
+                    selectedCardId = null;
+                    return;
                 }
 
-                // 2. Sprawdzenie Zwykłego Meldunku z Ręki (Otwarcie lewy)
-                if (gameState.trick.length === 0 && (card.rank === 'K' || card.rank === 'Q')) {
-                    const counterpart = card.rank === 'K' ? 'Q' : 'K';
-                    const hasPair = myHand.some(c => c.suit === card.suit && c.rank === counterpart);
+                if (canPlayCardClient(card, false)) {
+                    // Automatyczne sprawdzenie meldunku przy wyjściu z ręki K lub Q
+                    const counterpart = card.rank === 'K' ? 'Q' : (card.rank === 'Q' ? 'K' : null);
+                    const hasPair = counterpart && myHand.some(c => c.suit === card.suit && c.rank === counterpart);
                     const isMelded = gameState.meldedSuits.includes(card.suit);
 
-                    if (hasPair && !isMelded) {
-                        // Automatyczne meldowanie po wyjściu K lub Q z parą
-                        socket.emit('playCard', { seat: mySeat, cardId: card.id, tryMeld: true });
-                        return;
-                    }
-                }
+                    const shouldMeld = gameState.trick.length === 0 && hasPair && !isMelded;
 
-                // 3. Zwykłe zagranie karty bez meldunku
-                if (canPlayCardClient(card, false)) {
-                    socket.emit('playCard', { seat: mySeat, cardId: card.id, tryMeld: false });
+                    socket.emit('playCard', { seat: mySeat, cardId: card.id, tryMeld: shouldMeld });
+                    selectedCardId = null;
                 }
-            };
-        }
+            } else {
+                renderUI(); // Odśwież zaznaczenie w ręce
+            }
+        };
 
         handContainer.appendChild(cardDiv);
     });
@@ -216,6 +215,29 @@ function renderMyHand() {
 function renderActions() {
     const actionsContainer = document.getElementById('actions-container');
     actionsContainer.innerHTML = '';
+
+    // Dedykowana obsługa Przycisk Meldunek K/Q
+    if (gameState.phase === 'play' && gameState.leader === mySeat && gameState.trick.length === 0) {
+        const myHand = gameState.players[mySeat]?.hand || [];
+        const selectedCard = myHand.find(c => c.id === selectedCardId);
+
+        if (selectedCard && (selectedCard.rank === 'K' || selectedCard.rank === 'Q')) {
+            const counterpart = selectedCard.rank === 'K' ? 'Q' : 'K';
+            const hasPair = myHand.some(c => c.suit === selectedCard.suit && c.rank === counterpart);
+            const isMelded = gameState.meldedSuits.includes(selectedCard.suit);
+
+            if (hasPair && !isMelded) {
+                const meldBtn = document.createElement('button');
+                meldBtn.innerText = `👑 Zamelduj ${selectedCard.suit}`;
+                meldBtn.className = 'meld-btn';
+                meldBtn.onclick = () => {
+                    socket.emit('declareMeld', { seat: mySeat, suit: selectedCard.suit, cardId: selectedCard.id });
+                    selectedCardId = null;
+                };
+                actionsContainer.appendChild(meldBtn);
+            }
+        }
+    }
 
     if (gameState.phase === 'bid' && gameState.bidder === mySeat) {
         const bidBtn = document.createElement('button');
