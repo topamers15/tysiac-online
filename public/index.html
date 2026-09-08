@@ -108,6 +108,8 @@
             <div id="admin-console" style="display: none;">
                 <div style="color: #f1c40f; font-weight: bold; font-size: 12px; margin-bottom: 6px;">🛠 KONSOLA ADMINA (TESTY)</div>
                 <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
+                    <button class="btn btn-primary" onclick="socket.emit('adminCommand', 'addbot')">🤖 Dodaj Bota</button>
+                    <button class="btn btn-danger" onclick="socket.emit('adminCommand', 'restart')">🔄 Restart Gry</button>
                     <button class="btn btn-dark" onclick="socket.emit('adminCommand', 'pause')">⏸️ Pauza</button>
                     <button class="btn btn-dark" onclick="socket.emit('adminCommand', 'resume')">▶️ Wznów</button>
                     <button class="btn btn-dark" onclick="socket.emit('adminCommand', 'addpoints 1 100')">+100 P1</button>
@@ -115,7 +117,7 @@
                     <button class="btn btn-dark" onclick="socket.emit('adminCommand', 'dealnines 0')">🃏 4x9 dla P1</button>
                 </div>
                 <div style="display: flex; gap: 5px;">
-                    <input type="text" id="admin-cmd-input" placeholder="Wpisz komendę (np. addpoints 1 50, settrump kier, kick 1)..." style="flex: 1; padding: 4px; font-size: 12px;">
+                    <input type="text" id="admin-cmd-input" placeholder="Wpisz komendę (np. addbot, restart, settrump czerwo, kick 1)..." style="flex: 1; padding: 4px; font-size: 12px;">
                     <button id="admin-exec-btn" class="btn btn-warning" style="padding: 4px 10px; font-size: 12px;">Wykonaj</button>
                 </div>
             </div>
