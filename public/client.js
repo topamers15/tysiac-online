@@ -4,9 +4,10 @@ let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
 
-const SUIT_ORDER = { 'karo': 1, 'kier': 2, 'pik': 3, 'trefl': 4 };
+// Kolejność i symbole według tradycyjnych polskich nazw
+const SUIT_ORDER = { 'dzwonek': 1, 'czerwo': 2, 'wino': 3, 'żołądź': 4 };
 const RANK_POWER = { 'A': 6, '10': 5, 'K': 4, 'Q': 3, 'J': 2, '9': 1 };
-const SUIT_SYMBOLS = { karo: '♦', kier: '♥', pik: '♠', trefl: '♣' };
+const SUIT_SYMBOLS = { dzwonek: '♦', czerwo: '♥', wino: '♠', żołądź: '♣' };
 
 const loginScreen = document.getElementById('login-screen');
 const gameScreen = document.getElementById('game-screen');
