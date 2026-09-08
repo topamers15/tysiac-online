@@ -11,6 +11,7 @@ const joinBtn = document.getElementById('join-btn');
 
 const playBtn = document.getElementById('play-btn');
 const meldBtn = document.getElementById('meld-btn');
+const takeMusikBtn = document.getElementById('take-musik-btn');
 
 const biddingActions = document.getElementById('bidding-actions');
 const mainActions = document.getElementById('main-actions');
@@ -22,6 +23,10 @@ const modal = document.getElementById('give-card-modal');
 joinBtn?.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
     if (name) socket.emit('joinGame', name);
+});
+
+takeMusikBtn?.addEventListener('click', () => {
+    socket.emit('takeMusik');
 });
 
 playBtn?.addEventListener('click', () => {
@@ -98,7 +103,6 @@ function renderHeader() {
     document.getElementById('score-info').innerText = `Ogólny: P1: ${gameState.scores[0]} | P2: ${gameState.scores[1]}`;
     document.getElementById('trump-info').innerText = `Atut: ${gameState.trump ? gameState.trump.toUpperCase() : 'Brak'}`;
     
-    // Obliczanie punktów z bieżącego rozdania (lew + meldunki)
     const p1RoundScore = (gameState.roundTricks?.[0] || 0) + (gameState.roundMelds?.[0] || 0);
     const p2RoundScore = (gameState.roundTricks?.[1] || 0) + (gameState.roundMelds?.[1] || 0);
     document.getElementById('round-live-score').innerText = `W tym rozdaniu — P1: ${p1RoundScore} | P2: ${p2RoundScore}`;
@@ -173,7 +177,7 @@ function renderTable() {
     gameState.trick.forEach(item => {
         const cardDiv = document.createElement('div');
         cardDiv.className = `card ${item.card.red ? 'red' : ''}`;
-        cardDiv.innerHTML = `<div>${item.card.rank}</div><div>${item.card.symbol}</div>`;
+        cardDiv.innerHTML = `<div>${card.rank}</div><div>${card.symbol}</div>`;
         trickContainer.appendChild(cardDiv);
     });
 }
@@ -204,6 +208,9 @@ function updateControls() {
 
     biddingActions.style.display = 'none';
     mainActions.style.display = 'none';
+    if (takeMusikBtn) takeMusikBtn.style.display = 'none';
+    if (playBtn) playBtn.style.display = 'inline-block';
+    if (meldBtn) meldBtn.style.display = 'inline-block';
 
     if (gameState.phase === 'bid') {
         if (gameState.bidder === mySeat) {
@@ -215,15 +222,26 @@ function updateControls() {
             status.innerText = `Licytuje: ${gameState.players[gameState.bidder]?.name} (${gameState.highestBid} pkt)`;
         }
     } else if (gameState.phase === 'show_musik') {
-        status.innerText = 'Odsłanianie musiku dla wszystkich graczy...';
-    } else if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
-        const remainingCount = 3 - gameState.givenToSeats.length;
-        status.innerText = `Zaznacz kartę i wybierz gracza (pozostało do oddania: ${remainingCount}).`;
-        mainActions.style.display = 'flex';
-        if (playBtn) playBtn.innerText = 'Oddaj kartę...';
-        if (meldBtn) meldBtn.style.display = 'none';
+        if (gameState.highestBidder === mySeat) {
+            status.innerText = 'Wygrałeś licytację! Pobierz musik lub poczekaj 10s.';
+            mainActions.style.display = 'flex';
+            if (takeMusikBtn) takeMusikBtn.style.display = 'inline-block';
+            if (playBtn) playBtn.style.display = 'none';
+            if (meldBtn) meldBtn.style.display = 'none';
+        } else {
+            status.innerText = 'Odsłanianie musiku dla wszystkich graczy (10s)...';
+        }
+    } else if (gameState.phase === 'exchange') {
+        if (gameState.highestBidder === mySeat) {
+            const remainingCount = 3 - gameState.givenToSeats.length;
+            status.innerText = `Zaznacz kartę i wybierz gracza (pozostało do oddania: ${remainingCount}).`;
+            mainActions.style.display = 'flex';
+            if (playBtn) playBtn.innerText = 'Oddaj kartę...';
+            if (meldBtn) meldBtn.style.display = 'none';
+        } else {
+            status.innerText = 'Zwycięzca licytacji oddaje karty pozostałym graczon...';
+        }
     } else if (gameState.phase === 'play') {
-        if (meldBtn) meldBtn.style.display = 'inline-block';
         if (gameState.leader === mySeat) {
             status.innerText = 'Twoja kolej na ruch!';
             mainActions.style.display = 'flex';
