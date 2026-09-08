@@ -4,6 +4,11 @@ let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
 
+// Mapowanie układu kolorów i siły kart
+const SUIT_ORDER = { 'karo': 1, 'kier': 2, 'pik': 3, 'trefl': 4 };
+const RANK_POWER = { 'A': 6, '10': 5, 'K': 4, 'Q': 3, 'J': 2, '9': 1 };
+const SUIT_SYMBOLS = { karo: '♦', kier: '♥', pik: '♠', trefl: '♣' };
+
 const loginScreen = document.getElementById('login-screen');
 const gameScreen = document.getElementById('game-screen');
 const playerNameInput = document.getElementById('player-name');
@@ -113,11 +118,18 @@ function renderUI() {
 function renderHeader() {
     document.getElementById('round-info').innerText = `Rozdanie: ${gameState.round}`;
     document.getElementById('score-info').innerText = `Ogólny: P1: ${gameState.scores[0]} | P2: ${gameState.scores[1]}`;
-    document.getElementById('trump-info').innerText = `Atut: ${gameState.trump ? gameState.trump.toUpperCase() : 'Brak'}`;
     
+    // Symbol przy atucie
+    const trumpSymbol = gameState.trump ? SUIT_SYMBOLS[gameState.trump] || '' : '';
+    const trumpText = gameState.trump ? `${gameState.trump.toUpperCase()} ${trumpSymbol}` : 'Brak';
+    document.getElementById('trump-info').innerText = `Atut: ${trumpText}`;
+    
+    // Punkty w tym rozdaniu + wylicytowana wartość
     const p1RoundScore = (gameState.roundTricks?.[0] || 0) + (gameState.roundMelds?.[0] || 0);
     const p2RoundScore = (gameState.roundTricks?.[1] || 0) + (gameState.roundMelds?.[1] || 0);
-    document.getElementById('round-live-score').innerText = `W tym rozdaniu — P1: ${p1RoundScore} | P2: ${p2RoundScore}`;
+    const bidInfo = gameState.highestBid ? ` | Wylicytowano: ${gameState.highestBid}` : '';
+    
+    document.getElementById('round-live-score').innerText = `W tym rozdaniu — P1: ${p1RoundScore} | P2: ${p2RoundScore}${bidInfo}`;
 }
 
 function renderPlayers() {
@@ -197,7 +209,15 @@ function renderTable() {
 function renderMyHand() {
     const handContainer = document.getElementById('my-hand');
     handContainer.innerHTML = '';
-    const myHand = gameState.players[mySeat]?.hand || [];
+    const myHand = [...(gameState.players[mySeat]?.hand || [])];
+
+    // Sortowanie kart: Kolorami -> Od najsilniejszej do najsłabszej (A, 10, K, Q, J, 9)
+    myHand.sort((a, b) => {
+        if (SUIT_ORDER[a.suit] !== SUIT_ORDER[b.suit]) {
+            return SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit];
+        }
+        return RANK_POWER[b.rank] - RANK_POWER[a.rank];
+    });
 
     myHand.forEach(card => {
         const cardDiv = document.createElement('div');
