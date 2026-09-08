@@ -174,10 +174,11 @@ function renderTable() {
     }
 
     tableLabel.innerText = 'STÓŁ';
+    // POPRAWKA BŁĘDU: zmiana card.rank / card.symbol na item.card.rank / item.card.symbol
     gameState.trick.forEach(item => {
         const cardDiv = document.createElement('div');
         cardDiv.className = `card ${item.card.red ? 'red' : ''}`;
-        cardDiv.innerHTML = `<div>${card.rank}</div><div>${card.symbol}</div>`;
+        cardDiv.innerHTML = `<div>${item.card.rank}</div><div>${item.card.symbol}</div>`;
         trickContainer.appendChild(cardDiv);
     });
 }
