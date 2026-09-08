@@ -3,6 +3,7 @@ const socket = io();
 let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
+let lastProcessedLog = "";
 
 const SUIT_ORDER = { 'dzwonek': 1, 'czerwo': 2, 'wino': 3, 'żołądź': 4 };
 const RANK_POWER = { 'A': 6, '10': 5, 'K': 4, 'Q': 3, 'J': 2, '9': 1 };
@@ -29,6 +30,64 @@ const modal = document.getElementById('give-card-modal');
 const gameOverModal = document.getElementById('game-over-modal');
 const shuffleTeamsBtn = document.getElementById('shuffle-teams-btn');
 const adminConsole = document.getElementById('admin-console');
+
+// --- EFEKTY DŹWIĘKOWE (WEB AUDIO API) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playSound(type) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'card') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(300, now);
+        osc.frequency.exponentialRampToValueAtTime(100, now + 0.08);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.08);
+        osc.start(now);
+        osc.stop(now + 0.08);
+    } else if (type === 'meld') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.1);
+        osc.frequency.setValueAtTime(783.99, now + 0.2);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
+        osc.start(now);
+        osc.stop(now + 0.4);
+    } else if (type === 'pass') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.linearRampToValueAtTime(80, now + 0.2);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+    }
+}
+
+function sendReaction(emoji) {
+    socket.emit('sendReaction', emoji);
+}
+
+socket.on('showPlayerReaction', ({ seat, emoji }) => {
+    const playerCards = document.querySelectorAll('.player-card');
+    const targetPlayerDiv = playerCards[seat];
+    
+    if (targetPlayerDiv) {
+        const bubble = document.createElement('div');
+        bubble.className = 'reaction-bubble';
+        bubble.innerText = emoji;
+        targetPlayerDiv.appendChild(bubble);
+
+        setTimeout(() => bubble.remove(), 2000);
+    }
+});
 
 window.addEventListener('DOMContentLoaded', () => {
     const savedName = localStorage.getItem('tysiac_username');
@@ -123,6 +182,14 @@ socket.on('assignedSeat', (seat) => {
 });
 
 socket.on('stateUpdate', (state) => {
+    const latestLog = state.log[state.log.length - 1] || '';
+    if (latestLog !== lastProcessedLog) {
+        lastProcessedLog = latestLog;
+        if (latestLog.includes('zagrywa')) playSound('card');
+        if (latestLog.includes('MELDUNEK')) playSound('meld');
+        if (latestLog.includes('pasuje')) playSound('pass');
+    }
+
     gameState = state;
     renderUI();
 });
