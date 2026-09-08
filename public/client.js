@@ -3,7 +3,6 @@ const socket = io();
 let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
-let givenCards = [];
 
 const loginScreen = document.getElementById('login-screen');
 const gameScreen = document.getElementById('game-screen');
@@ -29,17 +28,19 @@ playBtn?.addEventListener('click', () => {
     if (gameState?.phase === 'exchange') {
         openExchangeModal();
     } else if (selectedCardId !== null && mySeat !== null) {
-        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId });
+        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, isMeld: false });
         selectedCardId = null;
     } else {
-        alert('Wybierz kartę!');
+        alert('Wybierz kartę z ręki!');
     }
 });
 
 meldBtn?.addEventListener('click', () => {
     if (selectedCardId !== null && mySeat !== null) {
-        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId });
+        socket.emit('playCard', { seat: mySeat, cardId: selectedCardId, isMeld: true });
         selectedCardId = null;
+    } else {
+        alert('Wybierz kartę K lub Q do meldunku!');
     }
 });
 
@@ -52,6 +53,10 @@ bidBtn?.addEventListener('click', () => {
 
 passBtn?.addEventListener('click', () => {
     if (mySeat !== null) socket.emit('bid', { seat: mySeat, amount: 0 });
+});
+
+socket.on('invalidMove', (msg) => {
+    alert(msg);
 });
 
 document.getElementById('chat-send-btn')?.addEventListener('click', sendChat);
@@ -91,7 +96,7 @@ function renderUI() {
 function renderHeader() {
     document.getElementById('round-info').innerText = `Rozdanie: ${gameState.round}`;
     document.getElementById('score-info').innerText = `Para 1: ${gameState.scores[0]} | Para 2: ${gameState.scores[1]}`;
-    document.getElementById('trump-info').innerText = `Atut: ${gameState.trump || 'Brak'}`;
+    document.getElementById('trump-info').innerText = `Atut: ${gameState.trump ? gameState.trump.toUpperCase() : 'Brak'}`;
 }
 
 function renderPlayers() {
@@ -111,22 +116,12 @@ function renderPlayers() {
             🎴 Karty: ${p.hand ? p.hand.length : 0}
         `;
 
-        if (isHost && p.isBot) {
-            const removeBtn = document.createElement('button');
-            removeBtn.className = 'btn btn-danger';
-            removeBtn.style.cssText = 'padding: 2px 6px; font-size: 10px; margin-top: 5px; width: 100%;';
-            removeBtn.innerText = '❌ Usuń Bota';
-            removeBtn.onclick = () => socket.emit('removeBot', p.seat);
-            div.appendChild(removeBtn);
-        }
-
         playersContainer.appendChild(div);
     });
 
     if (isHost && gameState.players.length < 4 && gameState.phase === 'waiting') {
         const addBotBtn = document.createElement('button');
         addBotBtn.className = 'btn btn-primary';
-        addBotBtn.style.cssText = 'padding: 6px 12px; font-size: 12px; margin-left: 10px; align-self: center;';
         addBotBtn.innerText = '🤖 + Dodaj Bota';
         addBotBtn.onclick = () => socket.emit('addBot');
         playersContainer.appendChild(addBotBtn);
@@ -144,6 +139,17 @@ function renderTable() {
             const cardDiv = document.createElement('div');
             cardDiv.className = 'card card-back';
             cardDiv.innerHTML = '🎴';
+            trickContainer.appendChild(cardDiv);
+        });
+        return;
+    }
+
+    if (gameState.phase === 'show_musik') {
+        tableLabel.innerText = 'MUSIK (ODSŁONIĘTY - 10 SEKUND)';
+        gameState.musik.forEach(card => {
+            const cardDiv = document.createElement('div');
+            cardDiv.className = `card ${card.red ? 'red' : ''}`;
+            cardDiv.innerHTML = `<div>${card.rank}</div><div>${card.symbol}</div>`;
             trickContainer.appendChild(cardDiv);
         });
         return;
@@ -194,11 +200,16 @@ function updateControls() {
         } else {
             status.innerText = `Licytuje: ${gameState.players[gameState.bidder]?.name} (${gameState.highestBid} pkt)`;
         }
+    } else if (gameState.phase === 'show_musik') {
+        status.innerText = 'Odsłanianie musiku dla wszystkich graczy...';
     } else if (gameState.phase === 'exchange' && gameState.highestBidder === mySeat) {
-        status.innerText = 'Zaznacz kartę i kliknij przycisk poniżej, aby przekazać 2 karty przeciwnikom.';
+        const remainingCount = 3 - gameState.givenToSeats.length;
+        status.innerText = `Zaznacz kartę i wybierz gracza (pozostało do oddania: ${remainingCount}).`;
         mainActions.style.display = 'flex';
-        if (playBtn) playBtn.innerText = 'Przekaż kartę...';
+        if (playBtn) playBtn.innerText = 'Oddaj kartę...';
+        if (meldBtn) meldBtn.style.display = 'none';
     } else if (gameState.phase === 'play') {
+        if (meldBtn) meldBtn.style.display = 'inline-block';
         if (gameState.leader === mySeat) {
             status.innerText = 'Twoja kolej na ruch!';
             mainActions.style.display = 'flex';
@@ -220,24 +231,14 @@ function openExchangeModal() {
     recipientsDiv.innerHTML = '';
 
     gameState.players.forEach(p => {
-        if (p.seat !== mySeat) {
+        if (p.seat !== mySeat && !gameState.givenToSeats.includes(p.seat)) {
             const btn = document.createElement('button');
             btn.className = 'btn btn-primary';
             btn.innerText = `Oddaj dla: ${p.name}`;
             btn.onclick = () => {
-                givenCards.push({ cardId: selectedCardId, targetSeat: p.seat });
+                socket.emit('giveCard', { seat: mySeat, cardId: selectedCardId, targetSeat: p.seat });
                 selectedCardId = null;
                 modal.style.display = 'none';
-
-                if (givenCards.length === 2) {
-                    const selectedIds = givenCards.map(g => g.cardId);
-                    const recipients = givenCards.map(g => g.targetSeat);
-                    socket.emit('exchangeCards', { seat: mySeat, selectedIds, recipients });
-                    givenCards = [];
-                } else {
-                    alert(`Karta przekazana! Wybierz jeszcze 1 kartę.`);
-                    renderUI();
-                }
             };
             recipientsDiv.appendChild(btn);
         }
