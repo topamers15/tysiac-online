@@ -12,11 +12,12 @@ const RANKS = ['9', '10', 'J', 'Q', 'K', 'A'];
 const RANK_VALUES = { '9': 0, 'J': 2, 'Q': 3, 'K': 4, '10': 10, 'A': 11 };
 const RANK_POWER  = { '9': 1, 'J': 2, 'Q': 3, 'K': 4, '10': 5, 'A': 6 };
 
+// Tradycyjne polskie nazwy kolorów
 const SUITS = [
-    { name: 'karo', symbol: '♦', red: true, value: 40 },
-    { name: 'kier', symbol: '♥', red: true, value: 60 },
-    { name: 'pik', symbol: '♠', red: false, value: 80 },
-    { name: 'trefl', symbol: '♣', red: false, value: 100 }
+    { name: 'dzwonek', symbol: '♦', red: true, value: 40 },
+    { name: 'czerwo', symbol: '♥', red: true, value: 60 },
+    { name: 'wino', symbol: '♠', red: false, value: 80 },
+    { name: 'żołądź', symbol: '♣', red: false, value: 100 }
 ];
 
 let gameState = createInitialState();
@@ -466,15 +467,54 @@ io.on('connection', (socket) => {
         const cmd = parts[0].toLowerCase();
 
         switch (cmd) {
+            case 'addbot':
+                if (gameState.players.length >= 4) {
+                    socket.emit('invalidMove', 'Stół jest pełny!');
+                    return;
+                }
+                const botSeat = gameState.players.length;
+                gameState.players.push({
+                    id: `bot_${Date.now()}_${botSeat}`,
+                    name: `Bot_${botSeat + 1}`,
+                    seat: botSeat,
+                    isBot: true,
+                    isHost: false,
+                    connected: true,
+                    hand: [],
+                    passed: false,
+                    usedFourNinesFold: false
+                });
+                addChat(`🛠 ADMIN: Dodano bota Bot_${botSeat + 1}.`);
+                if (gameState.players.length === 4 && gameState.phase === 'waiting') {
+                    startRound();
+                }
+                break;
+
+            case 'restart':
+                gameState.scores = [0, 0];
+                gameState.round = 1;
+                gameState.isPaused = false;
+                addChat('🛠 ADMIN: Gra została całkowicie zrestartowana!');
+                addLog('--- RESTART GRY ---');
+                if (gameState.players.length === 4) {
+                    startRound();
+                } else {
+                    gameState.phase = 'waiting';
+                    gameState.players.forEach(p => p.hand = []);
+                }
+                break;
+
             case 'pause':
                 gameState.isPaused = true;
                 addChat('🛠 ADMIN: Gra została wstrzymana.');
                 break;
+
             case 'resume':
                 gameState.isPaused = false;
                 addChat('🛠 ADMIN: Gra została wznowiona.');
                 checkBotTurn();
                 break;
+
             case 'addpoints':
                 const team = parseInt(parts[1]) - 1;
                 const pts = parseInt(parts[2]);
@@ -483,13 +523,17 @@ io.on('connection', (socket) => {
                     addChat(`🛠 ADMIN: Para ${team + 1} otrzymała ${pts} pkt.`);
                 }
                 break;
+
             case 'settrump':
-                const suit = parts[1]?.toLowerCase();
-                if (['karo', 'kier', 'pik', 'trefl'].includes(suit)) {
-                    gameState.trump = suit;
-                    addChat(`🛠 ADMIN: Zmieniono atut na ${suit.toUpperCase()}.`);
+                const suitInput = parts[1]?.toLowerCase();
+                const validSuits = ['dzwonek', 'czerwo', 'wino', 'żołądź', 'zoladz'];
+                if (validSuits.includes(suitInput)) {
+                    const actualSuit = suitInput === 'zoladz' ? 'żołądź' : suitInput;
+                    gameState.trump = actualSuit;
+                    addChat(`🛠 ADMIN: Zmieniono atut na ${actualSuit.toUpperCase()}.`);
                 }
                 break;
+
             case 'kick':
                 const targetSeat = parseInt(parts[1]);
                 if (!isNaN(targetSeat) && gameState.players[targetSeat]) {
@@ -499,20 +543,22 @@ io.on('connection', (socket) => {
                     addChat(`🛠 ADMIN: Usunięto gracza ${kickedName}.`);
                 }
                 break;
+
             case 'dealnines':
                 const pSeat = parseInt(parts[1]);
                 const pTarget = gameState.players[pSeat];
                 if (pTarget) {
                     const nines = [
-                        { id: 901, rank: '9', suit: 'karo', symbol: '♦', red: true },
-                        { id: 902, rank: '9', suit: 'kier', symbol: '♥', red: true },
-                        { id: 903, rank: '9', suit: 'pik', symbol: '♠', red: false },
-                        { id: 904, rank: '9', suit: 'trefl', symbol: '♣', red: false }
+                        { id: 901, rank: '9', suit: 'dzwonek', symbol: '♦', red: true },
+                        { id: 902, rank: '9', suit: 'czerwo', symbol: '♥', red: true },
+                        { id: 903, rank: '9', suit: 'wino', symbol: '♠', red: false },
+                        { id: 904, rank: '9', suit: 'żołądź', symbol: '♣', red: false }
                     ];
                     pTarget.hand = pTarget.hand.slice(0, 1).concat(nines);
                     addChat(`🛠 ADMIN: Przyznano 4 dziewiątki dla ${pTarget.name}.`);
                 }
                 break;
+
             default:
                 socket.emit('invalidMove', 'Nieznana komenda admina.');
                 return;
