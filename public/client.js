@@ -22,6 +22,8 @@ const biddingActions = document.getElementById('bidding-actions');
 const mainActions = document.getElementById('main-actions');
 const bidBtn = document.getElementById('bid-btn');
 const passBtn = document.getElementById('pass-btn');
+const bidSlider = document.getElementById('bid-slider');
+const bidValueDisplay = document.getElementById('bid-value-display');
 
 const modal = document.getElementById('give-card-modal');
 const adminConsole = document.getElementById('admin-console');
@@ -65,10 +67,14 @@ meldBtn?.addEventListener('click', () => {
     }
 });
 
+bidSlider?.addEventListener('input', (e) => {
+    if (bidValueDisplay) bidValueDisplay.innerText = e.target.value;
+});
+
 bidBtn?.addEventListener('click', () => {
-    if (mySeat !== null && gameState) {
-        const nextBid = (gameState.highestBid || 100) + 10;
-        socket.emit('bid', { seat: mySeat, amount: nextBid });
+    if (mySeat !== null && gameState && bidSlider) {
+        const amount = parseInt(bidSlider.value, 10);
+        socket.emit('bid', { seat: mySeat, amount });
     }
 });
 
@@ -91,7 +97,6 @@ function sendChat() {
     }
 }
 
-// Komendy konsoli Admina
 document.getElementById('admin-exec-btn')?.addEventListener('click', sendAdminCmd);
 document.getElementById('admin-cmd-input')?.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendAdminCmd();
@@ -262,10 +267,19 @@ function updateControls() {
 
     if (gameState.phase === 'bid') {
         if (gameState.bidder === mySeat) {
-            const nextBid = (gameState.highestBid || 100) + 10;
-            status.innerText = `Twoja kolej! Licytujesz.`;
+            const minBid = (gameState.highestBid || 100) + 10;
+
+            if (bidSlider) {
+                bidSlider.min = minBid > 300 ? 300 : minBid;
+                bidSlider.max = 300;
+                if (parseInt(bidSlider.value, 10) < minBid) {
+                    bidSlider.value = minBid > 300 ? 300 : minBid;
+                }
+                if (bidValueDisplay) bidValueDisplay.innerText = bidSlider.value;
+            }
+
+            status.innerText = `Twoja kolej! Wybierz kwotę suwakiem i zlicytuj.`;
             biddingActions.style.display = 'flex';
-            if (bidBtn) bidBtn.innerText = `Licytuj ${nextBid}`;
         } else {
             status.innerText = `Licytuje: ${gameState.players[gameState.bidder]?.name} (${gameState.highestBid} pkt)`;
         }
