@@ -368,10 +368,7 @@ function checkBotTurn() {
 }
 
 function shufflePlayersAndRestart() {
-    // Losowe mieszanie tablicy graczy
     gameState.players.sort(() => Math.random() - 0.5);
-    
-    // Przypisanie nowych miejsc (0, 1, 2, 3)
     gameState.players.forEach((p, idx) => {
         p.seat = idx;
         p.hand = [];
@@ -439,6 +436,13 @@ io.on('connection', (socket) => {
             startRound();
         } else {
             io.emit('stateUpdate', gameState);
+        }
+    });
+
+    socket.on('sendReaction', (emoji) => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (player) {
+            io.emit('showPlayerReaction', { seat: player.seat, emoji });
         }
     });
 
