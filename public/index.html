@@ -13,15 +13,16 @@
             <h1>🎴 Tysiąc Online</h1>
             <p>Wpisz swój nick, aby dołączyć:</p>
             <input type="text" id="player-name" placeholder="Twój nick..." maxlength="15" />
-            <button id="join-btn">Dołącz do gry</button>
+            <button id="join-btn">Dołączyć do gry</button>
         </div>
     </div>
 
     <div id="game-screen" class="screen" style="display: none;">
         <header class="game-header">
             <div id="round-info" class="badge">Rozdanie: 1</div>
-            <div id="score-info" class="badge highlight">Para 1: 0 | Para 2: 0</div>
+            <div id="score-info" class="badge highlight">Ogólny: P1: 0 | P2: 0</div>
             <div id="trump-info" class="badge trump">Atut: Brak</div>
+            <div id="round-live-score" class="badge highlight" style="border-color: #2ecc71; color: #2ecc71;">W tym rozdaniu — P1: 0 | P2: 0</div>
         </header>
 
         <div class="poker-table">
