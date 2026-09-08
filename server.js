@@ -91,6 +91,22 @@ function startRound() {
     checkBotTurn();
 }
 
+function processTakeMusik() {
+    if (gameState.phase !== 'show_musik') return;
+
+    const winner = gameState.players[gameState.highestBidder];
+    if (winner && gameState.musik.length > 0) {
+        winner.hand.push(...gameState.musik);
+        gameState.musik = [];
+    }
+
+    gameState.phase = 'exchange';
+    gameState.givenToSeats = [];
+    addLog(`${winner.name} zabiera musik. Przekaż po 1 karcie dla każdego gracza.`);
+    io.emit('stateUpdate', gameState);
+    checkBotTurn();
+}
+
 function handleBid(seat, amount) {
     if (gameState.phase !== 'bid' || gameState.bidder !== seat) return;
     const player = gameState.players[seat];
@@ -100,7 +116,7 @@ function handleBid(seat, amount) {
         addLog(`${player.name} pasuje.`);
     } else if (amount > gameState.highestBid) {
         gameState.highestBid = amount;
-        gameState.highestBidder = seat;
+        gameState.highestBidder = amount > 100 ? seat : gameState.highestBidder;
         addLog(`${player.name} licytuje ${amount}`);
     }
 
@@ -112,14 +128,7 @@ function handleBid(seat, amount) {
         io.emit('stateUpdate', gameState);
 
         setTimeout(() => {
-            if (gameState.phase === 'show_musik') {
-                gameState.players[gameState.highestBidder].hand.push(...gameState.musik);
-                gameState.phase = 'exchange';
-                gameState.givenToSeats = [];
-                addLog(`${winner.name} zabiera musik. Przekaż po 1 karcie dla każdego gracza.`);
-                io.emit('stateUpdate', gameState);
-                checkBotTurn();
-            }
+            processTakeMusik();
         }, 10000);
         return;
     }
@@ -183,7 +192,6 @@ function executePlayCard(seat, cardId, isMeldAttempt) {
 
     if (isMeldAttempt && (card.rank === 'K' || card.rank === 'Q')) {
         const otherRank = card.rank === 'K' ? 'Q' : 'K';
-        
         const hasPairInHand = player.hand.some(c => c.suit === card.suit && c.rank === otherRank);
         const hasPairInTrick = gameState.trick.some(t => t.card.suit === card.suit && t.card.rank === otherRank);
 
@@ -222,7 +230,7 @@ function executePlayCard(seat, cardId, isMeldAttempt) {
                 io.emit('stateUpdate', gameState);
                 checkBotTurn();
             }
-        }, 1500);
+        }, 1200);
     } else {
         gameState.leader = (gameState.leader + 1) % 4;
         io.emit('stateUpdate', gameState);
@@ -286,7 +294,7 @@ function checkBotTurn() {
                 } else {
                     handleBid(current.seat, 0);
                 }
-            }, 1000);
+            }, 800);
         }
     } else if (gameState.phase === 'exchange') {
         const winner = gameState.players[gameState.highestBidder];
@@ -295,7 +303,7 @@ function checkBotTurn() {
                 const opponents = gameState.players.filter(p => p.seat !== winner.seat);
                 opponents.forEach(opponent => {
                     const card = winner.hand.shift();
-                    opponent.hand.push(card);
+                    if (card) opponent.hand.push(card);
                 });
 
                 gameState.phase = 'play';
@@ -303,7 +311,7 @@ function checkBotTurn() {
                 addLog(`${winner.name} przekazał karty i rozpoczyna grę.`);
                 io.emit('stateUpdate', gameState);
                 checkBotTurn();
-            }, 1500);
+            }, 1000);
         }
     } else if (gameState.phase === 'play') {
         const leader = gameState.players[gameState.leader];
@@ -386,6 +394,13 @@ io.on('connection', (socket) => {
             }
 
             io.emit('stateUpdate', gameState);
+        }
+    });
+
+    socket.on('takeMusik', () => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (player && gameState.phase === 'show_musik' && player.seat === gameState.highestBidder) {
+            processTakeMusik();
         }
     });
 
