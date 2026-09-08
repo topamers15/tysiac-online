@@ -12,7 +12,6 @@ const RANKS = ['9', '10', 'J', 'Q', 'K', 'A'];
 const RANK_VALUES = { '9': 0, 'J': 2, 'Q': 3, 'K': 4, '10': 10, 'A': 11 };
 const RANK_POWER  = { '9': 1, 'J': 2, 'Q': 3, 'K': 4, '10': 5, 'A': 6 };
 
-// Zaktualizowane wartości meldunków według Twoich wytycznych
 const SUITS = [
     { name: 'karo', symbol: '♦', red: true, value: 40 },
     { name: 'kier', symbol: '♥', red: true, value: 60 },
@@ -31,9 +30,9 @@ function createInitialState() {
         musik: [],
         trick: [],
         trump: null,
-        scores: [0, 0],            // Ogólny wynik (Para 1, Para 2)
-        roundMelds: [0, 0],        // Punkty z meldunków w bieżącym rozdaniu
-        roundTricks: [0, 0],       // Punkty z lew w bieżącym rozdaniu
+        scores: [0, 0],
+        roundMelds: [0, 0],
+        roundTricks: [0, 0],
         highestBid: 100,
         highestBidder: null,
         bidder: 0,
@@ -133,18 +132,16 @@ function handleBid(seat, amount) {
     checkBotTurn();
 }
 
-// Sprawdzanie legalności zagrania pod kolor
 function isPlayLegal(hand, card, leadCard) {
-    if (!leadCard) return true; // Pierwsza karta w lewie
+    if (!leadCard) return true;
     const leadSuit = leadCard.suit;
     const hasLeadSuit = hand.some(c => c.suit === leadSuit);
     if (hasLeadSuit) {
-        return card.suit === leadSuit; // Musi rzucić pod kolor
+        return card.suit === leadSuit;
     }
-    return true; // Brak koloru - dopuszczalna dowolna karta
+    return true;
 }
 
-// Wyznaczanie zwycięzcy lewy
 function determineTrickWinner(trick, trump) {
     const leadSuit = trick[0].card.suit;
     let winner = trick[0];
@@ -177,7 +174,6 @@ function executePlayCard(seat, cardId, isMeldAttempt) {
     const card = player.hand[cardIdx];
     const leadCard = gameState.trick[0]?.card;
 
-    // Weryfikacja dokładania do koloru
     if (!isPlayLegal(player.hand, card, leadCard)) {
         return false;
     }
@@ -185,7 +181,6 @@ function executePlayCard(seat, cardId, isMeldAttempt) {
     player.hand.splice(cardIdx, 1);
     const suitData = SUITS.find(s => s.name === card.suit);
 
-    // Weryfikacja meldunku / przemeldowania
     if (isMeldAttempt && (card.rank === 'K' || card.rank === 'Q')) {
         const otherRank = card.rank === 'K' ? 'Q' : 'K';
         
@@ -221,7 +216,6 @@ function executePlayCard(seat, cardId, isMeldAttempt) {
             gameState.trick = [];
             gameState.leader = winnerSeat;
 
-            // Sprawdzanie końca rozdania
             if (gameState.players.every(p => p.hand.length === 0)) {
                 endRound();
             } else {
@@ -248,21 +242,19 @@ function endRound() {
     addLog(`Para Licytująca zdobyła: ${bidderScored} pkt (zadeklarowano: ${gameState.highestBid})`);
     addLog(`Para Przeciwna zdobyła: ${oppScored} pkt`);
 
-    // Rozliczenie Pary Licytującej
     if (bidderScored >= gameState.highestBid) {
         if (gameState.scores[bidderTeam] >= 800) {
             gameState.scores[bidderTeam] += gameState.highestBid;
-            addLog(`Para ${bidderTeam + 1} (na progu 800) wygrała licytację i dopisuje deklarowane +${gameState.highestBid} pkt.`);
+            addLog(`Para ${bidderTeam + 1} (na progu 800) wygrała licytację i dopisuje +${gameState.highestBid} pkt.`);
         } else {
             gameState.scores[bidderTeam] += bidderScored;
-            addLog(`Para ${bidderTeam + 1} wygrała licytację i dopisuje rzeczywiste +${bidderScored} pkt.`);
+            addLog(`Para ${bidderTeam + 1} wygrała licytację i dopisuje +${bidderScored} pkt.`);
         }
     } else {
         gameState.scores[bidderTeam] -= gameState.highestBid;
         addLog(`Para ${bidderTeam + 1} NIE ugrała licytacji! Traci -${gameState.highestBid} pkt.`);
     }
 
-    // Rozliczenie Pary Przeciwnej
     if (gameState.scores[oppTeam] >= 800) {
         addLog(`Para ${oppTeam + 1} znajduje się na progu 800 pkt i nie licytowała — dopisuje 0 pkt.`);
     } else {
@@ -270,7 +262,6 @@ function endRound() {
         addLog(`Para ${oppTeam + 1} dopisuje +${oppScored} pkt.`);
     }
 
-    // Warunek wygranej (1000 punktów)
     if (gameState.scores[0] >= 1000 || gameState.scores[1] >= 1000) {
         const winner = gameState.scores[0] >= 1000 ? 1 : 2;
         addLog(`🎉 GRA ZAKOŃCZONA! Wygrywa Para ${winner}!`);
@@ -375,6 +366,25 @@ io.on('connection', (socket) => {
         if (gameState.players.length === 4 && gameState.phase === 'waiting') {
             startRound();
         } else {
+            io.emit('stateUpdate', gameState);
+        }
+    });
+
+    socket.on('removeBot', (targetSeat) => {
+        const host = gameState.players.find(p => p.id === socket.id);
+        if (!host || !host.isHost) return;
+
+        const bot = gameState.players[targetSeat];
+        if (bot && bot.isBot) {
+            addChat(`SYSTEM: Usunięto ${bot.name}.`);
+            gameState.players.splice(targetSeat, 1);
+            gameState.players.forEach((p, idx) => p.seat = idx);
+
+            if (gameState.phase !== 'waiting') {
+                gameState = createInitialState();
+                addChat(`SYSTEM: Gra zresetowana z powodu usunięcia gracza.`);
+            }
+
             io.emit('stateUpdate', gameState);
         }
     });
