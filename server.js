@@ -12,7 +12,6 @@ const RANKS = ['9', '10', 'J', 'Q', 'K', 'A'];
 const RANK_VALUES = { '9': 0, 'J': 2, 'Q': 3, 'K': 4, '10': 10, 'A': 11 };
 const RANK_POWER  = { '9': 1, 'J': 2, 'Q': 3, 'K': 4, '10': 5, 'A': 6 };
 
-// Tradycyjne polskie nazwy kolorów
 const SUITS = [
     { name: 'dzwonek', symbol: '♦', red: true, value: 40 },
     { name: 'czerwo', symbol: '♥', red: true, value: 60 },
@@ -40,6 +39,7 @@ function createInitialState() {
         leader: 0,
         givenToSeats: [],
         isPaused: false,
+        winningTeam: null,
         log: [],
         chat: []
     };
@@ -304,9 +304,11 @@ function endRound() {
     }
 
     if (gameState.scores[0] >= 1000 || gameState.scores[1] >= 1000) {
-        const winner = gameState.scores[0] >= 1000 ? 1 : 2;
-        addLog(`🎉 GRA ZAKOŃCZONA! Wygrywa Para ${winner}!`);
+        const winningTeam = gameState.scores[0] >= 1000 ? 1 : 2;
         gameState.phase = 'game_over';
+        gameState.winningTeam = winningTeam;
+        addLog(`🎉 GRA ZAKOŃCZONA! Wygrywa Para ${winningTeam}!`);
+        addChat(`🏆 GRATULACJE! Para ${winningTeam} wygrywa mecz!`);
     } else {
         setTimeout(() => {
             if (gameState.isPaused) return;
@@ -319,13 +321,13 @@ function endRound() {
 }
 
 function checkBotTurn() {
-    if (gameState.isPaused) return;
+    if (gameState.isPaused || gameState.phase === 'game_over') return;
 
     if (gameState.phase === 'bid') {
         const current = gameState.players[gameState.bidder];
         if (current && current.isBot) {
             setTimeout(() => {
-                if (gameState.isPaused) return;
+                if (gameState.isPaused || gameState.phase === 'game_over') return;
                 if (gameState.highestBid < 120 && Math.random() > 0.3) {
                     handleBid(current.seat, gameState.highestBid + 10);
                 } else {
@@ -337,7 +339,7 @@ function checkBotTurn() {
         const winner = gameState.players[gameState.highestBidder];
         if (winner && winner.isBot) {
             setTimeout(() => {
-                if (gameState.isPaused) return;
+                if (gameState.isPaused || gameState.phase === 'game_over') return;
                 const opponents = gameState.players.filter(p => p.seat !== winner.seat);
                 opponents.forEach(opponent => {
                     const card = winner.hand.shift();
@@ -355,13 +357,41 @@ function checkBotTurn() {
         const leader = gameState.players[gameState.leader];
         if (leader && leader.isBot && leader.hand.length > 0) {
             setTimeout(() => {
-                if (gameState.isPaused) return;
+                if (gameState.isPaused || gameState.phase === 'game_over') return;
                 const legalCards = leader.hand.filter(c => isPlayLegal(leader.hand, c, gameState.trick, gameState.trump));
                 const cardToPlay = legalCards.length > 0 ? legalCards[0] : leader.hand[0];
                 
                 executePlayCard(leader.seat, cardToPlay.id, false);
             }, 1000);
         }
+    }
+}
+
+function shufflePlayersAndRestart() {
+    // Losowe mieszanie tablicy graczy
+    gameState.players.sort(() => Math.random() - 0.5);
+    
+    // Przypisanie nowych miejsc (0, 1, 2, 3)
+    gameState.players.forEach((p, idx) => {
+        p.seat = idx;
+        p.hand = [];
+        p.passed = false;
+        p.usedFourNinesFold = false;
+    });
+
+    gameState.scores = [0, 0];
+    gameState.round = 1;
+    gameState.winningTeam = null;
+    gameState.isPaused = false;
+
+    addChat('🔀 Przetasowano pary i rozpoczęto nową grę!');
+    addLog('--- WYMIESZANO PARY I ROZPOCZĘTO NOWĄ GRĘ ---');
+
+    if (gameState.players.length === 4) {
+        startRound();
+    } else {
+        gameState.phase = 'waiting';
+        io.emit('stateUpdate', gameState);
     }
 }
 
@@ -419,6 +449,10 @@ io.on('connection', (socket) => {
             addChat(`SYSTEM: Gracza ${player.name} rozłączyło.`);
             io.emit('stateUpdate', gameState);
         }
+    });
+
+    socket.on('shuffleAndRemix', () => {
+        shufflePlayersAndRestart();
     });
 
     socket.on('foldFourNines', () => {
@@ -494,6 +528,7 @@ io.on('connection', (socket) => {
                 gameState.scores = [0, 0];
                 gameState.round = 1;
                 gameState.isPaused = false;
+                gameState.winningTeam = null;
                 addChat('🛠 ADMIN: Gra została całkowicie zrestartowana!');
                 addLog('--- RESTART GRY ---');
                 if (gameState.players.length === 4) {
@@ -502,6 +537,10 @@ io.on('connection', (socket) => {
                     gameState.phase = 'waiting';
                     gameState.players.forEach(p => p.hand = []);
                 }
+                break;
+
+            case 'shuffle':
+                shufflePlayersAndRestart();
                 break;
 
             case 'pause':
@@ -521,6 +560,10 @@ io.on('connection', (socket) => {
                 if ((team === 0 || team === 1) && !isNaN(pts)) {
                     gameState.scores[team] += pts;
                     addChat(`🛠 ADMIN: Para ${team + 1} otrzymała ${pts} pkt.`);
+                    if (gameState.scores[team] >= 1000) {
+                        gameState.phase = 'game_over';
+                        gameState.winningTeam = team + 1;
+                    }
                 }
                 break;
 
@@ -541,21 +584,6 @@ io.on('connection', (socket) => {
                     gameState.players.splice(targetSeat, 1);
                     gameState.players.forEach((p, idx) => p.seat = idx);
                     addChat(`🛠 ADMIN: Usunięto gracza ${kickedName}.`);
-                }
-                break;
-
-            case 'dealnines':
-                const pSeat = parseInt(parts[1]);
-                const pTarget = gameState.players[pSeat];
-                if (pTarget) {
-                    const nines = [
-                        { id: 901, rank: '9', suit: 'dzwonek', symbol: '♦', red: true },
-                        { id: 902, rank: '9', suit: 'czerwo', symbol: '♥', red: true },
-                        { id: 903, rank: '9', suit: 'wino', symbol: '♠', red: false },
-                        { id: 904, rank: '9', suit: 'żołądź', symbol: '♣', red: false }
-                    ];
-                    pTarget.hand = pTarget.hand.slice(0, 1).concat(nines);
-                    addChat(`🛠 ADMIN: Przyznano 4 dziewiątki dla ${pTarget.name}.`);
                 }
                 break;
 
