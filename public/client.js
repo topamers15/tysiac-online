@@ -4,7 +4,6 @@ let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
 
-// Kolejność i symbole według tradycyjnych polskich nazw
 const SUIT_ORDER = { 'dzwonek': 1, 'czerwo': 2, 'wino': 3, 'żołądź': 4 };
 const RANK_POWER = { 'A': 6, '10': 5, 'K': 4, 'Q': 3, 'J': 2, '9': 1 };
 const SUIT_SYMBOLS = { dzwonek: '♦', czerwo: '♥', wino: '♠', żołądź: '♣' };
@@ -27,6 +26,8 @@ const bidSlider = document.getElementById('bid-slider');
 const bidValueDisplay = document.getElementById('bid-value-display');
 
 const modal = document.getElementById('give-card-modal');
+const gameOverModal = document.getElementById('game-over-modal');
+const shuffleTeamsBtn = document.getElementById('shuffle-teams-btn');
 const adminConsole = document.getElementById('admin-console');
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -47,6 +48,10 @@ joinBtn?.addEventListener('click', () => {
 
 takeMusikBtn?.addEventListener('click', () => socket.emit('takeMusik'));
 foldNinesBtn?.addEventListener('click', () => socket.emit('foldFourNines'));
+shuffleTeamsBtn?.addEventListener('click', () => {
+    if (gameOverModal) gameOverModal.style.display = 'none';
+    socket.emit('shuffleAndRemix');
+});
 
 playBtn?.addEventListener('click', () => {
     if (gameState?.phase === 'exchange') {
@@ -130,7 +135,27 @@ function renderUI() {
     renderMyHand();
     renderLogAndChat();
     renderAdminConsole();
+    renderGameOverModal();
     updateControls();
+}
+
+function renderGameOverModal() {
+    if (!gameOverModal) return;
+
+    if (gameState.phase === 'game_over') {
+        const winningTeam = gameState.winningTeam || (gameState.scores[0] >= 1000 ? 1 : 2);
+        const winners = gameState.players.filter(p => (p.seat % 2) === (winningTeam - 1)).map(p => p.name).join(' & ');
+        const scoreP1 = gameState.scores[0];
+        const scoreP2 = gameState.scores[1];
+
+        document.getElementById('winner-title').innerText = `🎉 GRATULACJE DLA PARY ${winningTeam}! 🎉`;
+        document.getElementById('winner-names').innerText = `Zwycięzcy: ${winners}`;
+        document.getElementById('winner-score-summary').innerText = `Wynik końcowy — Para 1: ${scoreP1} pkt | Para 2: ${scoreP2} pkt`;
+        
+        gameOverModal.style.display = 'flex';
+    } else {
+        gameOverModal.style.display = 'none';
+    }
 }
 
 function renderHeader() {
@@ -260,6 +285,11 @@ function updateControls() {
     if (foldNinesBtn) foldNinesBtn.style.display = 'none';
     if (playBtn) playBtn.style.display = 'inline-block';
     if (meldBtn) meldBtn.style.display = 'inline-block';
+
+    if (gameState.phase === 'game_over') {
+        status.innerText = '🎉 GRA ZAKOŃCZONA!';
+        return;
+    }
 
     if (gameState.isPaused) {
         status.innerText = 'PAUZA — Gra wstrzymana przez Admina.';
