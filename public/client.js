@@ -4,7 +4,6 @@ let mySeat = null;
 let gameState = null;
 let selectedCardId = null;
 
-// Mapowanie układu kolorów i siły kart
 const SUIT_ORDER = { 'karo': 1, 'kier': 2, 'pik': 3, 'trefl': 4 };
 const RANK_POWER = { 'A': 6, '10': 5, 'K': 4, 'Q': 3, 'J': 2, '9': 1 };
 const SUIT_SYMBOLS = { karo: '♦', kier: '♥', pik: '♠', trefl: '♣' };
@@ -17,6 +16,7 @@ const joinBtn = document.getElementById('join-btn');
 const playBtn = document.getElementById('play-btn');
 const meldBtn = document.getElementById('meld-btn');
 const takeMusikBtn = document.getElementById('take-musik-btn');
+const foldNinesBtn = document.getElementById('fold-nines-btn');
 
 const biddingActions = document.getElementById('bidding-actions');
 const mainActions = document.getElementById('main-actions');
@@ -24,8 +24,8 @@ const bidBtn = document.getElementById('bid-btn');
 const passBtn = document.getElementById('pass-btn');
 
 const modal = document.getElementById('give-card-modal');
+const adminConsole = document.getElementById('admin-console');
 
-// Automatyczne wczytanie zapamiętanego loginu
 window.addEventListener('DOMContentLoaded', () => {
     const savedName = localStorage.getItem('tysiac_username');
     if (savedName && playerNameInput) {
@@ -42,9 +42,8 @@ joinBtn?.addEventListener('click', () => {
     }
 });
 
-takeMusikBtn?.addEventListener('click', () => {
-    socket.emit('takeMusik');
-});
+takeMusikBtn?.addEventListener('click', () => socket.emit('takeMusik'));
+foldNinesBtn?.addEventListener('click', () => socket.emit('foldFourNines'));
 
 playBtn?.addEventListener('click', () => {
     if (gameState?.phase === 'exchange') {
@@ -77,9 +76,7 @@ passBtn?.addEventListener('click', () => {
     if (mySeat !== null) socket.emit('bid', { seat: mySeat, amount: 0 });
 });
 
-socket.on('invalidMove', (msg) => {
-    alert(msg);
-});
+socket.on('invalidMove', (msg) => alert(msg));
 
 document.getElementById('chat-send-btn')?.addEventListener('click', sendChat);
 document.getElementById('chat-input')?.addEventListener('keypress', (e) => {
@@ -90,6 +87,20 @@ function sendChat() {
     const input = document.getElementById('chat-input');
     if (input.value.trim()) {
         socket.emit('chatMessage', input.value.trim());
+        input.value = '';
+    }
+}
+
+// Komendy konsoli Admina
+document.getElementById('admin-exec-btn')?.addEventListener('click', sendAdminCmd);
+document.getElementById('admin-cmd-input')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendAdminCmd();
+});
+
+function sendAdminCmd() {
+    const input = document.getElementById('admin-cmd-input');
+    if (input.value.trim()) {
+        socket.emit('adminCommand', input.value.trim());
         input.value = '';
     }
 }
@@ -112,6 +123,7 @@ function renderUI() {
     renderTable();
     renderMyHand();
     renderLogAndChat();
+    renderAdminConsole();
     updateControls();
 }
 
@@ -119,17 +131,16 @@ function renderHeader() {
     document.getElementById('round-info').innerText = `Rozdanie: ${gameState.round}`;
     document.getElementById('score-info').innerText = `Ogólny: P1: ${gameState.scores[0]} | P2: ${gameState.scores[1]}`;
     
-    // Symbol przy atucie
     const trumpSymbol = gameState.trump ? SUIT_SYMBOLS[gameState.trump] || '' : '';
     const trumpText = gameState.trump ? `${gameState.trump.toUpperCase()} ${trumpSymbol}` : 'Brak';
     document.getElementById('trump-info').innerText = `Atut: ${trumpText}`;
     
-    // Punkty w tym rozdaniu + wylicytowana wartość
     const p1RoundScore = (gameState.roundTricks?.[0] || 0) + (gameState.roundMelds?.[0] || 0);
     const p2RoundScore = (gameState.roundTricks?.[1] || 0) + (gameState.roundMelds?.[1] || 0);
     const bidInfo = gameState.highestBid ? ` | Wylicytowano: ${gameState.highestBid}` : '';
+    const pauseInfo = gameState.isPaused ? ' ⏸️ (PAUZA)' : '';
     
-    document.getElementById('round-live-score').innerText = `W tym rozdaniu — P1: ${p1RoundScore} | P2: ${p2RoundScore}${bidInfo}`;
+    document.getElementById('round-live-score').innerText = `W tym rozdaniu — P1: ${p1RoundScore} | P2: ${p2RoundScore}${bidInfo}${pauseInfo}`;
 }
 
 function renderPlayers() {
@@ -211,7 +222,6 @@ function renderMyHand() {
     handContainer.innerHTML = '';
     const myHand = [...(gameState.players[mySeat]?.hand || [])];
 
-    // Sortowanie kart: Kolorami -> Od najsilniejszej do najsłabszej (A, 10, K, Q, J, 9)
     myHand.sort((a, b) => {
         if (SUIT_ORDER[a.suit] !== SUIT_ORDER[b.suit]) {
             return SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit];
@@ -241,8 +251,14 @@ function updateControls() {
     biddingActions.style.display = 'none';
     mainActions.style.display = 'none';
     if (takeMusikBtn) takeMusikBtn.style.display = 'none';
+    if (foldNinesBtn) foldNinesBtn.style.display = 'none';
     if (playBtn) playBtn.style.display = 'inline-block';
     if (meldBtn) meldBtn.style.display = 'inline-block';
+
+    if (gameState.isPaused) {
+        status.innerText = 'PAUZA — Gra wstrzymana przez Admina.';
+        return;
+    }
 
     if (gameState.phase === 'bid') {
         if (gameState.bidder === mySeat) {
@@ -274,11 +290,25 @@ function updateControls() {
             status.innerText = 'Zwycięzca licytacji oddaje karty pozostałym graczon...';
         }
     } else if (gameState.phase === 'play') {
+        const me = gameState.players[mySeat];
+        const myHand = me?.hand || [];
+        const ninesCount = myHand.filter(c => c.rank === '9').length;
+        const isFirstTrick = (gameState.roundTricks?.[0] === 0 && gameState.roundTricks?.[1] === 0);
+
+        if (isFirstTrick && ninesCount === 4 && !me?.usedFourNinesFold) {
+            mainActions.style.display = 'flex';
+            if (foldNinesBtn) foldNinesBtn.style.display = 'inline-block';
+        }
+
         if (gameState.leader === mySeat) {
             status.innerText = 'Twoja kolej na ruch!';
             mainActions.style.display = 'flex';
             if (playBtn) playBtn.innerText = 'Zagraj';
         } else {
+            if (!isFirstTrick || ninesCount !== 4 || me?.usedFourNinesFold) {
+                if (playBtn) playBtn.style.display = 'none';
+                if (meldBtn) meldBtn.style.display = 'none';
+            }
             status.innerText = 'Czekaj na ruch innego gracza...';
         }
     }
@@ -317,4 +347,10 @@ function renderLogAndChat() {
 
     const chatBox = document.getElementById('chat-box');
     if (chatBox) chatBox.innerHTML = gameState.chat.map(c => `<div>${c}</div>`).join('');
+}
+
+function renderAdminConsole() {
+    if (!adminConsole) return;
+    const isHost = gameState.players[mySeat]?.isHost;
+    adminConsole.style.display = isHost ? 'block' : 'none';
 }
