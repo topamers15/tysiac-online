@@ -95,8 +95,13 @@ function renderUI() {
 
 function renderHeader() {
     document.getElementById('round-info').innerText = `Rozdanie: ${gameState.round}`;
-    document.getElementById('score-info').innerText = `Para 1: ${gameState.scores[0]} | Para 2: ${gameState.scores[1]}`;
+    document.getElementById('score-info').innerText = `Ogólny: P1: ${gameState.scores[0]} | P2: ${gameState.scores[1]}`;
     document.getElementById('trump-info').innerText = `Atut: ${gameState.trump ? gameState.trump.toUpperCase() : 'Brak'}`;
+    
+    // Obliczanie punktów z bieżącego rozdania (lew + meldunki)
+    const p1RoundScore = (gameState.roundTricks?.[0] || 0) + (gameState.roundMelds?.[0] || 0);
+    const p2RoundScore = (gameState.roundTricks?.[1] || 0) + (gameState.roundMelds?.[1] || 0);
+    document.getElementById('round-live-score').innerText = `W tym rozdaniu — P1: ${p1RoundScore} | P2: ${p2RoundScore}`;
 }
 
 function renderPlayers() {
@@ -115,6 +120,15 @@ function renderPlayers() {
             <small>Para ${(idx % 2) + 1}</small><br>
             🎴 Karty: ${p.hand ? p.hand.length : 0}
         `;
+
+        if (isHost && p.isBot) {
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'btn btn-danger';
+            removeBtn.style.cssText = 'padding: 2px 6px; font-size: 11px; margin-top: 6px; width: 100%;';
+            removeBtn.innerText = '❌ Usuń Bota';
+            removeBtn.onclick = () => socket.emit('removeBot', p.seat);
+            div.appendChild(removeBtn);
+        }
 
         playersContainer.appendChild(div);
     });
