@@ -115,7 +115,7 @@ function handleBid(seat, amount) {
     if (amount === 0) {
         player.passed = true;
         addLog(`${player.name} pasuje.`);
-    } else if (amount > gameState.highestBid) {
+    } else if (amount > gameState.highestBid && amount <= 300) {
         gameState.highestBid = amount;
         gameState.highestBidder = seat;
         addLog(`${player.name} licytuje ${amount}`);
@@ -458,7 +458,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // KONSOLA ADMINA / PANEL HOST-A
     socket.on('adminCommand', (cmdStr) => {
         const player = gameState.players.find(p => p.id === socket.id);
         if (!player || !player.isHost) return;
@@ -497,8 +496,7 @@ io.on('connection', (socket) => {
                     const kickedName = gameState.players[targetSeat].name;
                     gameState.players.splice(targetSeat, 1);
                     gameState.players.forEach((p, idx) => p.seat = idx);
-                    gameState = createInitialState();
-                    addChat(`🛠 ADMIN: Gracza ${kickedName} usunięto. Zresetowano grę.`);
+                    addChat(`🛠 ADMIN: Usunięto gracza ${kickedName}.`);
                 }
                 break;
             case 'dealnines':
@@ -558,11 +556,6 @@ io.on('connection', (socket) => {
             addChat(`SYSTEM: Usunięto ${bot.name}.`);
             gameState.players.splice(targetSeat, 1);
             gameState.players.forEach((p, idx) => p.seat = idx);
-
-            if (gameState.phase !== 'waiting') {
-                gameState = createInitialState();
-                addChat(`SYSTEM: Gra zresetowana z powodu usunięcia gracza.`);
-            }
 
             io.emit('stateUpdate', gameState);
         }
