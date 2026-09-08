@@ -38,6 +38,7 @@ function createInitialState() {
         bidder: 0,
         leader: 0,
         givenToSeats: [],
+        isPaused: false,
         log: [],
         chat: []
     };
@@ -92,7 +93,7 @@ function startRound() {
 }
 
 function processTakeMusik() {
-    if (gameState.phase !== 'show_musik') return;
+    if (gameState.phase !== 'show_musik' || gameState.isPaused) return;
 
     const winner = gameState.players[gameState.highestBidder];
     if (winner && gameState.musik.length > 0) {
@@ -108,7 +109,7 @@ function processTakeMusik() {
 }
 
 function handleBid(seat, amount) {
-    if (gameState.phase !== 'bid' || gameState.bidder !== seat) return;
+    if (gameState.phase !== 'bid' || gameState.bidder !== seat || gameState.isPaused) return;
     const player = gameState.players[seat];
 
     if (amount === 0) {
@@ -203,6 +204,7 @@ function determineTrickWinner(trick, trump) {
 }
 
 function executePlayCard(seat, cardId, isMeldAttempt) {
+    if (gameState.isPaused) return false;
     const player = gameState.players[seat];
     if (!player) return false;
 
@@ -241,6 +243,7 @@ function executePlayCard(seat, cardId, isMeldAttempt) {
     if (gameState.trick.length === 4) {
         io.emit('stateUpdate', gameState);
         setTimeout(() => {
+            if (gameState.isPaused) return;
             const winningPlay = determineTrickWinner(gameState.trick, gameState.trump);
             const winnerSeat = winningPlay.seat;
             const winnerTeam = winnerSeat % 2;
@@ -305,6 +308,7 @@ function endRound() {
         gameState.phase = 'game_over';
     } else {
         setTimeout(() => {
+            if (gameState.isPaused) return;
             gameState.round++;
             startRound();
         }, 4000);
@@ -314,10 +318,13 @@ function endRound() {
 }
 
 function checkBotTurn() {
+    if (gameState.isPaused) return;
+
     if (gameState.phase === 'bid') {
         const current = gameState.players[gameState.bidder];
         if (current && current.isBot) {
             setTimeout(() => {
+                if (gameState.isPaused) return;
                 if (gameState.highestBid < 120 && Math.random() > 0.3) {
                     handleBid(current.seat, gameState.highestBid + 10);
                 } else {
@@ -329,6 +336,7 @@ function checkBotTurn() {
         const winner = gameState.players[gameState.highestBidder];
         if (winner && winner.isBot) {
             setTimeout(() => {
+                if (gameState.isPaused) return;
                 const opponents = gameState.players.filter(p => p.seat !== winner.seat);
                 opponents.forEach(opponent => {
                     const card = winner.hand.shift();
@@ -346,6 +354,7 @@ function checkBotTurn() {
         const leader = gameState.players[gameState.leader];
         if (leader && leader.isBot && leader.hand.length > 0) {
             setTimeout(() => {
+                if (gameState.isPaused) return;
                 const legalCards = leader.hand.filter(c => isPlayLegal(leader.hand, c, gameState.trick, gameState.trump));
                 const cardToPlay = legalCards.length > 0 ? legalCards[0] : leader.hand[0];
                 
@@ -360,7 +369,6 @@ io.on('connection', (socket) => {
         const cleanName = name.trim();
         if (!cleanName) return;
 
-        // Powrót istniejącego gracza po podaniu loginu
         const existingPlayer = gameState.players.find(
             p => p.name.toLowerCase() === cleanName.toLowerCase() && !p.isBot
         );
@@ -375,7 +383,6 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // Nowy gracz
         if (gameState.players.length >= 4) {
             socket.emit('invalidMove', 'Gra jest pełna!');
             return;
@@ -390,7 +397,8 @@ io.on('connection', (socket) => {
             isHost: seat === 0,
             connected: true,
             hand: [],
-            passed: false
+            passed: false,
+            usedFourNinesFold: false
         });
 
         socket.emit('assignedSeat', seat);
@@ -412,6 +420,109 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('foldFourNines', () => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (!player || gameState.phase !== 'play') return;
+
+        if (player.usedFourNinesFold) {
+            socket.emit('invalidMove', 'Wykorzystałeś już swój limit 4 dziewiątek w tej grze!');
+            return;
+        }
+
+        const isFirstTrick = (gameState.roundTricks[0] === 0 && gameState.roundTricks[1] === 0);
+        if (!isFirstTrick) {
+            socket.emit('invalidMove', 'Można zgłosić 4 dziewiątki tylko podczas 1. lewy!');
+            return;
+        }
+
+        const ninesCount = player.hand.filter(c => c.rank === '9').length;
+
+        if (ninesCount === 4) {
+            player.usedFourNinesFold = true;
+            const oppTeam = 1 - (player.seat % 2);
+
+            let scoreNotice = '';
+            if (gameState.scores[oppTeam] >= 800) {
+                scoreNotice = ' Przeciwna para jest na progu 800 pkt (barykada) — brak punktów.';
+            } else {
+                gameState.scores[oppTeam] += 60;
+                scoreNotice = ` Para ${oppTeam + 1} otrzymuje +60 pkt.`;
+            }
+
+            addLog(`🃏 ${player.name} zgłasza 4 dziewiątki w 1. lewie!${scoreNotice} Rozdanie zostaje unieważnione.`);
+            addChat(`SYSTEM: ${player.name} zgłosił 4 dziewiątki.${scoreNotice}`);
+
+            startRound();
+        } else {
+            socket.emit('invalidMove', 'Nie masz 4 dziewiątek na ręce!');
+        }
+    });
+
+    // KONSOLA ADMINA / PANEL HOST-A
+    socket.on('adminCommand', (cmdStr) => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (!player || !player.isHost) return;
+
+        const parts = cmdStr.trim().split(' ');
+        const cmd = parts[0].toLowerCase();
+
+        switch (cmd) {
+            case 'pause':
+                gameState.isPaused = true;
+                addChat('🛠 ADMIN: Gra została wstrzymana.');
+                break;
+            case 'resume':
+                gameState.isPaused = false;
+                addChat('🛠 ADMIN: Gra została wznowiona.');
+                checkBotTurn();
+                break;
+            case 'addpoints':
+                const team = parseInt(parts[1]) - 1;
+                const pts = parseInt(parts[2]);
+                if ((team === 0 || team === 1) && !isNaN(pts)) {
+                    gameState.scores[team] += pts;
+                    addChat(`🛠 ADMIN: Para ${team + 1} otrzymała ${pts} pkt.`);
+                }
+                break;
+            case 'settrump':
+                const suit = parts[1]?.toLowerCase();
+                if (['karo', 'kier', 'pik', 'trefl'].includes(suit)) {
+                    gameState.trump = suit;
+                    addChat(`🛠 ADMIN: Zmieniono atut na ${suit.toUpperCase()}.`);
+                }
+                break;
+            case 'kick':
+                const targetSeat = parseInt(parts[1]);
+                if (!isNaN(targetSeat) && gameState.players[targetSeat]) {
+                    const kickedName = gameState.players[targetSeat].name;
+                    gameState.players.splice(targetSeat, 1);
+                    gameState.players.forEach((p, idx) => p.seat = idx);
+                    gameState = createInitialState();
+                    addChat(`🛠 ADMIN: Gracza ${kickedName} usunięto. Zresetowano grę.`);
+                }
+                break;
+            case 'dealnines':
+                const pSeat = parseInt(parts[1]);
+                const pTarget = gameState.players[pSeat];
+                if (pTarget) {
+                    const nines = [
+                        { id: 901, rank: '9', suit: 'karo', symbol: '♦', red: true },
+                        { id: 902, rank: '9', suit: 'kier', symbol: '♥', red: true },
+                        { id: 903, rank: '9', suit: 'pik', symbol: '♠', red: false },
+                        { id: 904, rank: '9', suit: 'trefl', symbol: '♣', red: false }
+                    ];
+                    pTarget.hand = pTarget.hand.slice(0, 1).concat(nines);
+                    addChat(`🛠 ADMIN: Przyznano 4 dziewiątki dla ${pTarget.name}.`);
+                }
+                break;
+            default:
+                socket.emit('invalidMove', 'Nieznana komenda admina.');
+                return;
+        }
+
+        io.emit('stateUpdate', gameState);
+    });
+
     socket.on('addBot', () => {
         const host = gameState.players.find(p => p.id === socket.id);
         if (!host || !host.isHost || gameState.players.length >= 4) return;
@@ -425,7 +536,8 @@ io.on('connection', (socket) => {
             isHost: false,
             connected: true,
             hand: [],
-            passed: false
+            passed: false,
+            usedFourNinesFold: false
         });
 
         addChat(`SYSTEM: Dodano bota Bot_${seat + 1}.`);
@@ -466,7 +578,7 @@ io.on('connection', (socket) => {
     socket.on('bid', ({ seat, amount }) => handleBid(seat, amount));
 
     socket.on('giveCard', ({ seat, cardId, targetSeat }) => {
-        if (gameState.phase !== 'exchange' || gameState.highestBidder !== seat) return;
+        if (gameState.phase !== 'exchange' || gameState.highestBidder !== seat || gameState.isPaused) return;
         if (gameState.givenToSeats.includes(targetSeat)) return;
 
         const sender = gameState.players[seat];
@@ -491,7 +603,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('playCard', ({ seat, cardId, isMeld }) => {
-        if (gameState.phase !== 'play' || gameState.leader !== seat) return;
+        if (gameState.phase !== 'play' || gameState.leader !== seat || gameState.isPaused) return;
         const success = executePlayCard(seat, cardId, !!isMeld);
         if (!success) {
             socket.emit('invalidMove', 'Musisz dołożyć do koloru i Przebić wyższą kartą (lub dać atut)!');
