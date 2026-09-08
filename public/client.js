@@ -20,9 +20,21 @@ const passBtn = document.getElementById('pass-btn');
 
 const modal = document.getElementById('give-card-modal');
 
+// Automatyczne wczytanie zapamiętanego loginu
+window.addEventListener('DOMContentLoaded', () => {
+    const savedName = localStorage.getItem('tysiac_username');
+    if (savedName && playerNameInput) {
+        playerNameInput.value = savedName;
+        socket.emit('joinGame', savedName);
+    }
+});
+
 joinBtn?.addEventListener('click', () => {
     const name = playerNameInput.value.trim();
-    if (name) socket.emit('joinGame', name);
+    if (name) {
+        localStorage.setItem('tysiac_username', name);
+        socket.emit('joinGame', name);
+    }
 });
 
 takeMusikBtn?.addEventListener('click', () => {
@@ -120,7 +132,7 @@ function renderPlayers() {
 
         div.className = `player-card ${isActive ? 'active' : ''}`;
         div.innerHTML = `
-            <strong>${p.name}${p.isBot ? ' 🤖' : ''}${p.isHost ? ' 👑' : ''}</strong><br>
+            <strong>${p.name}${p.isBot ? ' 🤖' : ''}${p.isHost ? ' 👑' : ''}${!p.connected ? ' 🔴 (rozłączony)' : ''}</strong><br>
             <small>Para ${(idx % 2) + 1}</small><br>
             🎴 Karty: ${p.hand ? p.hand.length : 0}
         `;
@@ -174,7 +186,6 @@ function renderTable() {
     }
 
     tableLabel.innerText = 'STÓŁ';
-    // POPRAWKA BŁĘDU: zmiana card.rank / card.symbol na item.card.rank / item.card.symbol
     gameState.trick.forEach(item => {
         const cardDiv = document.createElement('div');
         cardDiv.className = `card ${item.card.red ? 'red' : ''}`;
