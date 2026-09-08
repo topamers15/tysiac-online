@@ -23,7 +23,7 @@ let gameState = createInitialState();
 
 function createInitialState() {
     return {
-        phase: 'waiting', // waiting, bid, show_musik, exchange, play, game_over
+        phase: 'waiting',
         round: 1,
         players: [],
         deck: [],
@@ -116,7 +116,7 @@ function handleBid(seat, amount) {
         addLog(`${player.name} pasuje.`);
     } else if (amount > gameState.highestBid) {
         gameState.highestBid = amount;
-        gameState.highestBidder = amount > 100 ? seat : gameState.highestBidder;
+        gameState.highestBidder = seat;
         addLog(`${player.name} licytuje ${amount}`);
     }
 
@@ -124,7 +124,7 @@ function handleBid(seat, amount) {
     if (activePlayers.length === 1 && gameState.highestBidder !== null) {
         gameState.phase = 'show_musik';
         const winner = gameState.players[gameState.highestBidder];
-        addLog(`${winner.name} wygrywa licytację (${gameState.highestBid} pkt)! Odsłanianie musiku na 10 sekund...`);
+        addLog(`${winner.name} wygrywa licytację (${gameState.highestBid} pkt)! Odsłanianie musiku (10 sek)...`);
         io.emit('stateUpdate', gameState);
 
         setTimeout(() => {
@@ -141,13 +141,47 @@ function handleBid(seat, amount) {
     checkBotTurn();
 }
 
-function isPlayLegal(hand, card, leadCard) {
-    if (!leadCard) return true;
-    const leadSuit = leadCard.suit;
+// ZASADA OBOWIĄZKU PRZEBIJANIA I DOKŁADANIA DO KOLORU/ATUTU
+function isPlayLegal(hand, card, trick, trump) {
+    if (!trick || trick.length === 0) return true;
+
+    const leadSuit = trick[0].card.suit;
     const hasLeadSuit = hand.some(c => c.suit === leadSuit);
+
+    // 1. Gracz posiada karty w kolorze wyjścia
     if (hasLeadSuit) {
-        return card.suit === leadSuit;
+        if (card.suit !== leadSuit) return false;
+
+        const leadSuitInTrick = trick.filter(t => t.card.suit === leadSuit);
+        const maxLeadRankInTrick = Math.max(...leadSuitInTrick.map(t => RANK_POWER[t.card.rank]));
+        const higherLeadCards = hand.filter(c => c.suit === leadSuit && RANK_POWER[c.rank] > maxLeadRankInTrick);
+
+        // Jeśli gracz ma wyższą kartę w tym kolorze, MUSI ją rzucić
+        if (higherLeadCards.length > 0) {
+            return RANK_POWER[card.rank] > maxLeadRankInTrick;
+        }
+        return true;
     }
+
+    // 2. Gracz nie ma koloru wyjścia -> musi dać atut (jeśli jest aktywny i ma atut)
+    if (trump) {
+        const hasTrump = hand.some(c => c.suit === trump);
+        if (hasTrump) {
+            if (card.suit !== trump) return false;
+
+            const trumpInTrick = trick.filter(t => t.card.suit === trump);
+            if (trumpInTrick.length > 0) {
+                const maxTrumpRankInTrick = Math.max(...trumpInTrick.map(t => RANK_POWER[t.card.rank]));
+                const higherTrumpCards = hand.filter(c => c.suit === trump && RANK_POWER[c.rank] > maxTrumpRankInTrick);
+                if (higherTrumpCards.length > 0) {
+                    return RANK_POWER[card.rank] > maxTrumpRankInTrick;
+                }
+            }
+            return true;
+        }
+    }
+
+    // 3. Brak koloru i atutu -> dowolna karta
     return true;
 }
 
@@ -181,9 +215,8 @@ function executePlayCard(seat, cardId, isMeldAttempt) {
     if (cardIdx === -1) return false;
 
     const card = player.hand[cardIdx];
-    const leadCard = gameState.trick[0]?.card;
 
-    if (!isPlayLegal(player.hand, card, leadCard)) {
+    if (!isPlayLegal(player.hand, card, gameState.trick, gameState.trump)) {
         return false;
     }
 
@@ -211,6 +244,7 @@ function executePlayCard(seat, cardId, isMeldAttempt) {
     addLog(`${player.name} zagrywa ${card.rank}${card.symbol}`);
 
     if (gameState.trick.length === 4) {
+        io.emit('stateUpdate', gameState);
         setTimeout(() => {
             const winningPlay = determineTrickWinner(gameState.trick, gameState.trump);
             const winnerSeat = winningPlay.seat;
@@ -317,8 +351,7 @@ function checkBotTurn() {
         const leader = gameState.players[gameState.leader];
         if (leader && leader.isBot && leader.hand.length > 0) {
             setTimeout(() => {
-                const leadCard = gameState.trick[0]?.card;
-                const legalCards = leader.hand.filter(c => isPlayLegal(leader.hand, c, leadCard));
+                const legalCards = leader.hand.filter(c => isPlayLegal(leader.hand, c, gameState.trick, gameState.trump));
                 const cardToPlay = legalCards.length > 0 ? legalCards[0] : leader.hand[0];
                 
                 executePlayCard(leader.seat, cardToPlay.id, false);
@@ -435,7 +468,7 @@ io.on('connection', (socket) => {
         if (gameState.phase !== 'play' || gameState.leader !== seat) return;
         const success = executePlayCard(seat, cardId, !!isMeld);
         if (!success) {
-            socket.emit('invalidMove', 'Musisz dołożyć kartę do koloru lewy!');
+            socket.emit('invalidMove', 'Musisz dołożyć do koloru i Przebić wyższą kartą (lub dać atut)!');
         }
     });
 
