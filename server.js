@@ -141,14 +141,12 @@ function handleBid(seat, amount) {
     checkBotTurn();
 }
 
-// ZASADA OBOWIĄZKU PRZEBIJANIA I DOKŁADANIA DO KOLORU/ATUTU
 function isPlayLegal(hand, card, trick, trump) {
     if (!trick || trick.length === 0) return true;
 
     const leadSuit = trick[0].card.suit;
     const hasLeadSuit = hand.some(c => c.suit === leadSuit);
 
-    // 1. Gracz posiada karty w kolorze wyjścia
     if (hasLeadSuit) {
         if (card.suit !== leadSuit) return false;
 
@@ -156,14 +154,12 @@ function isPlayLegal(hand, card, trick, trump) {
         const maxLeadRankInTrick = Math.max(...leadSuitInTrick.map(t => RANK_POWER[t.card.rank]));
         const higherLeadCards = hand.filter(c => c.suit === leadSuit && RANK_POWER[c.rank] > maxLeadRankInTrick);
 
-        // Jeśli gracz ma wyższą kartę w tym kolorze, MUSI ją rzucić
         if (higherLeadCards.length > 0) {
             return RANK_POWER[card.rank] > maxLeadRankInTrick;
         }
         return true;
     }
 
-    // 2. Gracz nie ma koloru wyjścia -> musi dać atut (jeśli jest aktywny i ma atut)
     if (trump) {
         const hasTrump = hand.some(c => c.suit === trump);
         if (hasTrump) {
@@ -181,7 +177,6 @@ function isPlayLegal(hand, card, trick, trump) {
         }
     }
 
-    // 3. Brak koloru i atutu -> dowolna karta
     return true;
 }
 
@@ -362,12 +357,34 @@ function checkBotTurn() {
 
 io.on('connection', (socket) => {
     socket.on('joinGame', (name) => {
-        if (gameState.players.length >= 4) return;
-        const seat = gameState.players.length;
+        const cleanName = name.trim();
+        if (!cleanName) return;
 
+        // Powrót istniejącego gracza po podaniu loginu
+        const existingPlayer = gameState.players.find(
+            p => p.name.toLowerCase() === cleanName.toLowerCase() && !p.isBot
+        );
+
+        if (existingPlayer) {
+            existingPlayer.id = socket.id;
+            existingPlayer.connected = true;
+
+            socket.emit('assignedSeat', existingPlayer.seat);
+            addChat(`SYSTEM: ${existingPlayer.name} powrócił do gry!`);
+            io.emit('stateUpdate', gameState);
+            return;
+        }
+
+        // Nowy gracz
+        if (gameState.players.length >= 4) {
+            socket.emit('invalidMove', 'Gra jest pełna!');
+            return;
+        }
+
+        const seat = gameState.players.length;
         gameState.players.push({
             id: socket.id,
-            name,
+            name: cleanName,
             seat,
             isBot: false,
             isHost: seat === 0,
@@ -377,11 +394,20 @@ io.on('connection', (socket) => {
         });
 
         socket.emit('assignedSeat', seat);
-        addChat(`SYSTEM: ${name} dołączył do gry.`);
+        addChat(`SYSTEM: ${cleanName} dołączył do gry.`);
 
         if (gameState.players.length === 4 && gameState.phase === 'waiting') {
             startRound();
         } else {
+            io.emit('stateUpdate', gameState);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        const player = gameState.players.find(p => p.id === socket.id);
+        if (player) {
+            player.connected = false;
+            addChat(`SYSTEM: Gracza ${player.name} rozłączyło.`);
             io.emit('stateUpdate', gameState);
         }
     });
