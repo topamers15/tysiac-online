@@ -28,8 +28,8 @@
         .btn-dark { background: #34495e; color: white; }
         .bottom-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
         .log-box, .chat-box { background: #000; height: 120px; overflow-y: auto; padding: 8px; font-size: 12px; font-family: monospace; border-radius: 4px; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; }
-        .modal-content { background: #1e5c36; padding: 20px; border-radius: 8px; text-align: center; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); align-items: center; justify-content: center; z-index: 1000; }
+        .modal-content { background: #1e5c36; padding: 25px; border-radius: 12px; text-align: center; border: 2px solid #f1c40f; max-width: 500px; width: 90%; }
         #admin-console { background: #111; border: 1px solid #f1c40f; padding: 10px; margin-top: 15px; border-radius: 6px; }
         .slider-container { display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,0.3); padding: 4px 12px; border-radius: 6px; }
     </style>
@@ -109,6 +109,7 @@
                 <div style="color: #f1c40f; font-weight: bold; font-size: 12px; margin-bottom: 6px;">🛠 KONSOLA ADMINA (TESTY)</div>
                 <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
                     <button class="btn btn-primary" onclick="socket.emit('adminCommand', 'addbot')">🤖 Dodaj Bota</button>
+                    <button class="btn btn-warning" onclick="socket.emit('adminCommand', 'shuffle')">🔀 Wymieszaj pary</button>
                     <button class="btn btn-danger" onclick="socket.emit('adminCommand', 'restart')">🔄 Restart Gry</button>
                     <button class="btn btn-dark" onclick="socket.emit('adminCommand', 'pause')">⏸️ Pauza</button>
                     <button class="btn btn-dark" onclick="socket.emit('adminCommand', 'resume')">▶️ Wznów</button>
@@ -117,7 +118,7 @@
                     <button class="btn btn-dark" onclick="socket.emit('adminCommand', 'dealnines 0')">🃏 4x9 dla P1</button>
                 </div>
                 <div style="display: flex; gap: 5px;">
-                    <input type="text" id="admin-cmd-input" placeholder="Wpisz komendę (np. addbot, restart, settrump czerwo, kick 1)..." style="flex: 1; padding: 4px; font-size: 12px;">
+                    <input type="text" id="admin-cmd-input" placeholder="Wpisz komendę (np. addbot, restart, shuffle, settrump czerwo, kick 1)..." style="flex: 1; padding: 4px; font-size: 12px;">
                     <button id="admin-exec-btn" class="btn btn-warning" style="padding: 4px 10px; font-size: 12px;">Wykonaj</button>
                 </div>
             </div>
@@ -130,6 +131,18 @@
             <h3>Wybrana karta: <span id="selected-card-name"></span></h3>
             <p>Wybierz gracza, któremu chcesz przekazać tę kartę:</p>
             <div id="recipient-buttons" style="display: flex; gap: 10px; justify-content: center; margin-top: 15px;"></div>
+        </div>
+    </div>
+
+    <!-- MODAL KONIEC GRY / GRATULACJE -->
+    <div id="game-over-modal" class="modal">
+        <div class="modal-content">
+            <h2 id="winner-title" style="color: #f1c40f; margin-top: 0;"></h2>
+            <h3 id="winner-names" style="color: #ffffff;"></h3>
+            <p id="winner-score-summary" style="font-size: 14px; color: #ddd;"></p>
+            <div style="margin-top: 20px;">
+                <button id="shuffle-teams-btn" class="btn btn-warning" style="font-size: 16px; padding: 10px 20px;">🔀 Wymieszaj pary i zagraj od nowa</button>
+            </div>
         </div>
     </div>
 
