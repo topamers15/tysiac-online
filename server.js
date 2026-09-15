@@ -66,6 +66,10 @@ function addChat(msg) {
     if (gameState.chat.length > 20) gameState.chat.shift();
 }
 
+function roundPoints(pts) {
+    return Math.round(pts / 10) * 10;
+}
+
 function startRound() {
     if (gameState.players.length < 4) return;
     
@@ -279,28 +283,33 @@ function endRound() {
     const bidderScored = gameState.roundMelds[bidderTeam] + gameState.roundTricks[bidderTeam];
     const oppScored = gameState.roundMelds[oppTeam] + gameState.roundTricks[oppTeam];
 
-    addLog(`--- PODSUMOWANIE ROZDANIA ${gameState.round} ---`);
-    addLog(`Para Licytująca zdobyła: ${bidderScored} pkt (zadeklarowano: ${gameState.highestBid})`);
-    addLog(`Para Przeciwna zdobyła: ${oppScored} pkt`);
+    const bidderScoredRounded = roundPoints(bidderScored);
+    const oppScoredRounded = roundPoints(oppScored);
 
+    addLog(`--- PODSUMOWANIE ROZDANIA ${gameState.round} ---`);
+    addLog(`Para Licytująca zdobyła: ${bidderScored} pkt (zaokrąglone: ${bidderScoredRounded}) | Zadeklarowano: ${gameState.highestBid}`);
+    addLog(`Para Przeciwna zdobyła: ${oppScored} pkt (zaokrąglone: ${oppScoredRounded})`);
+
+    // Rozliczenie Pary Licytującej (sprawdzanie dokładnego warunku licytacji)
     if (bidderScored >= gameState.highestBid) {
         if (gameState.scores[bidderTeam] >= 800) {
             gameState.scores[bidderTeam] += gameState.highestBid;
             addLog(`Para ${bidderTeam + 1} (na progu 800) wygrała licytację i dopisuje +${gameState.highestBid} pkt.`);
         } else {
-            gameState.scores[bidderTeam] += bidderScored;
-            addLog(`Para ${bidderTeam + 1} wygrała licytację i dopisuje +${bidderScored} pkt.`);
+            gameState.scores[bidderTeam] += bidderScoredRounded;
+            addLog(`Para ${bidderTeam + 1} zdobyła co najmniej ${gameState.highestBid} pkt! Dopisuje zaokrąglone +${bidderScoredRounded} pkt.`);
         }
     } else {
         gameState.scores[bidderTeam] -= gameState.highestBid;
-        addLog(`Para ${bidderTeam + 1} NIE ugrała licytacji! Traci -${gameState.highestBid} pkt.`);
+        addLog(`Para ${bidderTeam + 1} zdobyła ${bidderScored} pkt (mniej niż zadeklarowane ${gameState.highestBid})! Traci -${gameState.highestBid} pkt.`);
     }
 
+    // Rozliczenie Pary Przeciwnej
     if (gameState.scores[oppTeam] >= 800) {
-        addLog(`Para ${oppTeam + 1} znajduje się na progu 800 pkt i nie licytowała — dopisuje 0 pkt.`);
+        addLog(`Para ${oppTeam + 1} znajduje się na progu 800 pkt (barykada) i nie licytowała — dopisuje 0 pkt.`);
     } else {
-        gameState.scores[oppTeam] += oppScored;
-        addLog(`Para ${oppTeam + 1} dopisuje +${oppScored} pkt.`);
+        gameState.scores[oppTeam] += oppScoredRounded;
+        addLog(`Para ${oppTeam + 1} dopisuje zaokrąglone +${oppScoredRounded} pkt.`);
     }
 
     if (gameState.scores[0] >= 1000 || gameState.scores[1] >= 1000) {
