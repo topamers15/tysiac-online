@@ -89,10 +89,11 @@ socket.on('showPlayerReaction', ({ seat, emoji }) => {
     }
 });
 
-window.addEventListener('DOMContentLoaded', () => {
+// Automatyczne dołączanie po pierwszym załadowaniu oraz po ponownym połączeniu
+socket.on('connect', () => {
     const savedName = localStorage.getItem('tysiac_username');
-    if (savedName && playerNameInput) {
-        playerNameInput.value = savedName;
+    if (savedName) {
+        if (playerNameInput) playerNameInput.value = savedName;
         socket.emit('joinGame', savedName);
     }
 });
@@ -191,6 +192,12 @@ socket.on('stateUpdate', (state) => {
     }
 
     gameState = state;
+
+    if (gameState && gameState.players && socket.id) {
+        const me = gameState.players.find(p => p.id === socket.id);
+        if (me) mySeat = me.seat;
+    }
+
     renderUI();
 });
 
@@ -243,17 +250,53 @@ function renderHeader() {
 
 function renderPlayers() {
     const playersContainer = document.getElementById('players-container');
+    if (!playersContainer) return;
+
     playersContainer.innerHTML = '';
-    const isHost = gameState.players[mySeat]?.isHost;
+    const isHost = mySeat !== null && gameState.players[mySeat]?.isHost;
 
     gameState.players.forEach((p, idx) => {
         const div = document.createElement('div');
+
+        // Sprawdzenie kogo jest ruch
         const isActive = (gameState.phase === 'bid' && gameState.bidder === idx) ||
                          (gameState.phase === 'play' && gameState.leader === idx);
 
+        // Sprawdzenie czy gracz wygrywa licytację
+        const isHighestBidder = (gameState.phase === 'bid' || gameState.phase === 'show_musik' || gameState.phase === 'exchange') 
+                                && gameState.highestBidder === idx;
+
+        // Sprawdzenie czy gracz spasował w licytacji
+        const hasPassed = gameState.phase === 'bid' && p.passed;
+
         div.className = `player-card ${isActive ? 'active' : ''}`;
+        
+        // Dynamiczna stylizacja kart gracza przy stole
+        if (isHighestBidder) {
+            div.style.borderColor = '#f1c40f';
+            div.style.boxShadow = '0 0 12px rgba(241, 196, 15, 0.8)';
+            div.style.opacity = '1';
+        } else if (hasPassed) {
+            div.style.opacity = '0.55';
+            div.style.borderColor = '#7f8c8d';
+            div.style.boxShadow = 'none';
+        } else {
+            div.style.opacity = '1';
+            div.style.borderColor = '';
+            div.style.boxShadow = '';
+        }
+
+        // Etykieta ze stanem w licytacji
+        let bidStatusHtml = '';
+        if (isHighestBidder) {
+            bidStatusHtml = `<span style="color:#f1c40f; font-weight:bold; background:rgba(0,0,0,0.6); padding:2px 8px; border-radius:10px; font-size:12px; display:inline-block; margin:3px 0;">👑 ${gameState.highestBid} pkt</span><br>`;
+        } else if (hasPassed) {
+            bidStatusHtml = `<span style="color:#e74c3c; font-weight:bold; background:rgba(0,0,0,0.6); padding:2px 8px; border-radius:10px; font-size:12px; display:inline-block; margin:3px 0;">❌ PAS</span><br>`;
+        }
+
         div.innerHTML = `
             <strong>${p.name}${p.isBot ? ' 🤖' : ''}${p.isHost ? ' 👑' : ''}${!p.connected ? ' 🔴 (rozłączony)' : ''}</strong><br>
+            ${bidStatusHtml}
             <small>Para ${(idx % 2) + 1}</small><br>
             🎴 Karty: ${p.hand ? p.hand.length : 0}
         `;
